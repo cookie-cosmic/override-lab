@@ -1,0 +1,17 @@
+# Render blueprint: one Docker web service running the whole app (JSON API + built SPA).
+# The free plan needs no credit card. The image is self-contained (Node built-ins only).
+services:
+  - type: web
+    name: override-lab
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      # Prompted for on first blueprint creation; never stored in the repo.
+      - key: ROBOTEVENTS_TOKEN
+        sync: false
+      # Free instances have an ephemeral disk, so the SQLite archive lives in /tmp.
+      - key: VEX_DATA_DIR
+        value: /tmp/vex

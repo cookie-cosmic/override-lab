@@ -1,0 +1,16 @@
+node_modules
+dist
+# The local archive and its WAL never belong in an image; the counter-rule base does.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/archive
+.env
+.env.*
+.git
+.gitignore
+*.log
+freebuff-sites-build
+Dockerfile
+.dockerignore
+README.md

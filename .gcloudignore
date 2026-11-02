@@ -1,0 +1,14 @@
+# Controls what `gcloud run deploy --source .` uploads for the Cloud Build.
+# Present so the upload never depends on whatever .gitignore happens to say:
+# the token in .env and the local archive must never leave this machine.
+node_modules/
+dist/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/archive/
+.env
+.env.*
+.git/
+*.log
+freebuff-sites-build/

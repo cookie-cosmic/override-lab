@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "vexx-ana"
+  },
+  "targets": {
+    "vexx-ana": {
+      "hosting": {
+        "app": ["override-lab"]
+      }
+    }
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "program": "VRC",
+  "notes": "Editable counter-strategy knowledge base. Each rule fires when an opponent metric crosses a threshold. `expectedPoints` is the point swing you gain if the counter is executed, `requires` gates the rule on your own capability, and `confidence` reflects how well the metric predicts the behaviour. Thresholds are defaults for a V5-era game — tune them per season.",
+  "rules": [
+    {
+      "id": "contest-auton",
+      "title": "Contest autonomous",
+      "when": { "metric": "autonPerMatch", "op": "<", "value": 12 },
+      "requires": { "metric": "autonPerMatch", "min": 6 },
+      "expectedPoints": 12,
+      "confidence": "high",
+      "action": "Send your auton into their starting quarter instead of your own safe route. Denying a weak auton converts their weakest 15 seconds into a 1v0 phase.",
+      "trigger": "If your auton lands, press their start tile immediately at driver start",
+      "roles": ["auton lead", "forward press"],
+      "tags": ["auton", "early"]
+    },
+    {
+      "id": "deny-endgame",
+      "title": "Deny their endgame",
+      "when": { "metric": "ceiling", "op": ">", "value": 70 },
+      "requires": { "metric": "driverPerMatch", "min": 18 },
+      "expectedPoints": 9,
+      "confidence": "medium",
+      "action": "Their score is carried by a big endgame. Occupy the endgame structure in the last 20 seconds and force a late, lower-value climb.",
+      "trigger": "At 0:25, commit one robot to the endgame zone, not to scoring",
+      "roles": ["denial specialist"],
+      "tags": ["endgame", "late"]
+    },
+    {
+      "id": "pressure-low-floor",
+      "title": "Pressure a low floor",
+      "when": { "metric": "floor", "op": "<", "value": 28 },
+      "requires": { "metric": "driverPerMatch", "min": 16 },
+      "expectedPoints": 10,
+      "confidence": "high",
+      "action": "A low floor means the bad version of this team is very bad. Play contact-heavy early: every disrupted cycle compounds, because they have no recovery pattern.",
+      "trigger": "From 1:30, bump their primary scorer on every route to the scoring zone",
+      "roles": ["defender", "denial"],
+      "tags": ["defense", "early"]
+    },
+    {
+      "id": "bait-penalties",
+      "title": "Bait them into penalties",
+      "when": { "metric": "penaltyPerMatch", "op": ">", "value": 1.5 },
+      "requires": { "metric": "winRate", "min": 0.3 },
+      "expectedPoints": 7,
+      "confidence": "medium",
+      "action": "They are already penalty-prone. Force contested possessions near protected zones so marginal calls go against them, and never retaliate.",
+      "trigger": "Never match their contact; disengage and re-enter from the far side",
+      "roles": ["disciplined driver"],
+      "tags": ["penalties", "discipline"]
+    },
+    {
+      "id": "out-cycle-volatile",
+      "title": "Beat them on cycle consistency",
+      "when": { "metric": "cv", "op": ">", "value": 0.3 },
+      "requires": { "metric": "consistency", "min": 0.2 },
+      "expectedPoints": 8,
+      "confidence": "high",
+      "action": "Their score swings wildly. Do not chase their peak — protect your own floor, take the safe cycle, and let their variance lose the match for them.",
+      "trigger": "If you are ahead by 10 at 0:30, switch to safe cycles and endgame only",
+      "roles": ["primary scorer"],
+      "tags": ["late", "safe"]
+    },
+    {
+      "id": "starve-objects",
+      "title": "Starve the shared objects",
+      "when": { "metric": "autonShare", "op": ">", "value": 0.35 },
+      "requires": { "metric": "autonPerMatch", "min": 4 },
+      "expectedPoints": 9,
+      "confidence": "medium",
+      "action": "A large share of their points comes from a small number of field objects. Pre-load and deny that object class before they can start their routine.",
+      "trigger": "First 30s: clear their target object class, not the nearest one",
+      "roles": ["collector", "denial"],
+      "tags": ["early", "resources"]
+    },
+    {
+      "id": "exploit-weak-skills",
+      "title": "Exploit untested auton paths",
+      "when": { "metric": "skillsProg", "op": "<", "value": 20 },
+      "requires": { "metric": "autonPerMatch", "min": 5 },
+      "expectedPoints": 6,
+      "confidence": "medium",
+      "action": "Low programming-skills output usually means their auton was never run under pressure. Expect a failure or a slow route; plan your auton to finish in the space they vacate.",
+      "trigger": "If their auton visibly fails, take their abandoned zone immediately",
+      "roles": ["auton lead"],
+      "tags": ["auton", "early"]
+    },
+    {
+      "id": "carry-denial",
+      "title": "Neutralise the carry, then beat the support",
+      "when": { "metric": "ceilingGap", "op": ">", "value": 25 },
+      "requires": { "metric": "driverPerMatch", "min": 14 },
+      "expectedPoints": 11,
+      "confidence": "high",
+      "action": "One robot produces most of their ceiling. Do not try to out-score the carry — suppress the support robot and win the 1v1 on the second-best scorer.",
+      "trigger": "Assign your second driver to their support robot for the whole match",
+      "roles": ["defender", "secondary scorer"],
+      "tags": ["defense", "matchups"]
+    },
+    {
+      "id": "protect-lead",
+      "title": "Protect an early lead",
+      "when": { "metric": "winRate", "op": ">", "value": 0.6 },
+      "requires": { "metric": "floor", "min": 20 },
+      "expectedPoints": 5,
+      "confidence": "low",
+      "action": "Strong teams convert leads. If you get ahead, slow the game down: safe cycles, endgame first, no hero plays.",
+      "trigger": "Ahead at 0:45: endgame first, then score with whatever time remains",
+      "roles": ["primary scorer"],
+      "tags": ["late", "safe"]
+    },
+    {
+      "id": "slow-start-press",
+      "title": "Press a slow starter",
+      "when": { "metric": "driverPerMatch", "op": "<", "value": 18 },
+      "requires": { "metric": "driverPerMatch", "min": 20 },
+      "expectedPoints": 8,
+      "confidence": "medium",
+      "action": "Low driver-control output means their first cycle is slow. Take the centre immediately and hold it — the early 15 points are the cheapest points in the match.",
+      "trigger": "First 20s: take and hold the primary scoring zone",
+      "roles": ["forward press"],
+      "tags": ["early", "resources"]
+    }
+  ]
+}

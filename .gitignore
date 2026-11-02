@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/vex.db
+data/vex.db-wal
+data/vex.db-shm
+.env
+.dev.vars
+*.log
+/freebuff-sites-build/
+.firebase/
