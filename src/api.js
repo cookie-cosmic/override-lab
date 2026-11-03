@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 
+// The UI can be served from a different origin than the API: Firebase Hosting carries the
+// static build while the Node server answers /api elsewhere. Same-origin builds leave this
+// empty, so those requests stay relative and unchanged.
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
+
 export async function api(path, opts = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     headers: { 'content-type': 'application/json' },
     ...opts
   })

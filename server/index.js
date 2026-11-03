@@ -15,6 +15,17 @@ const DIST = path.join(ROOT, 'dist')
 const PORT = Number(process.env.PORT || 3000)
 const HOST = process.env.HOST || '0.0.0.0'
 
+// The static UI may be hosted on another origin (Firebase Hosting) while the API lives here.
+// No request carries credentials, so a wildcard origin is safe; CORS_ORIGIN pins it to one
+// host if that ever changes.
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
+const CORS_HEADERS = {
+  'access-control-allow-origin': CORS_ORIGIN,
+  'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+  'access-control-allow-headers': 'content-type',
+  'access-control-max-age': '86400'
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -81,6 +92,13 @@ const server = http.createServer(async (req, res) => {
     return
   }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+    // Cross-origin POSTs send application/json, which always asks permission first.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS)
+      res.end()
+      return
+    }
+    res.setHeader('access-control-allow-origin', CORS_ORIGIN)
     await handleApi(req, res, url)
     return
   }
