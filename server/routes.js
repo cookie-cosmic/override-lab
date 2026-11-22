@@ -89,8 +89,8 @@ const eventCard = (e) => ({
 })
 
 /** Search inside the current season only. Never falls back to an older archive. */
-async function findInSeason({ q = '', team = '' } = {}) {
-  const bearer = robotEventsToken()
+async function findInSeason({ q = '', team = '', token = null } = {}) {
+  const bearer = token || robotEventsToken()
   const season = await currentSeason()
   if (!bearer) {
     return {
@@ -151,10 +151,26 @@ export async function handleApi(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean).slice(1)
   const q = url.searchParams
   const method = req.method
+  // A key pasted in the UI arrives as a header. It is used for this request only and never
+  // stored server-side, so a deployment whose own token is missing or rejected still works.
+  const clientToken = String(req.headers['x-robotevents-token'] || '').trim()
+  const authToken = clientToken || robotEventsToken()
 
   try {
     if (parts[0] === 'health') {
-      return sendJson(res, 200, { ok: true, events: db.listEvents().length, version: 1 })
+      return sendJson(res, 200, { ok: true, events: db.listEvents().length, version: 1, wokeAt: new Date().toISOString() })
+    }
+
+    // Checks a key the user pasted, without revealing either key anywhere.
+    if (parts[0] === 'token' && parts[1] === 'check' && method === 'POST') {
+      if (!clientToken) return sendJson(res, 200, { ok: false, error: 'no key was sent' })
+      try {
+        const probe = new RobotEvents(clientToken)
+        await probe.get('/seasons', { per_page: 5 })
+        return sendJson(res, 200, { ok: true, source: 'client' })
+      } catch (e) {
+        return sendJson(res, 200, { ok: false, error: e.message })
+      }
     }
 
     // Unsaved sessions: an event resolved for review lives in the archive only until the
@@ -191,7 +207,7 @@ export async function handleApi(req, res, url) {
     // The season is the scope of the whole app: which game is being played right now, and
     // which events in it are still ahead of the team.
     if (parts[0] === 'season') {
-      const token = robotEventsToken()
+      const token = authToken
       if (parts[1] === 'events') {
         const b = method === 'POST' ? await body(req) : {}
         const team = String(b.team || q.get('team') || '').trim().toUpperCase()
@@ -261,14 +277,19 @@ export async function handleApi(req, res, url) {
         })
       }
       const season = await currentSeason()
-      return sendJson(res, 200, { season, token: Boolean(token) })
+      return sendJson(res, 200, {
+        season,
+        token: Boolean(token),
+        tokenSource: clientToken ? 'client' : token ? 'server' : null
+      })
     }
 
     if (parts[0] === 'find' && (method === 'GET' || method === 'POST')) {
       const b = method === 'POST' ? await body(req) : {}
       const out = await findInSeason({
         q: String(b.q ?? q.get('q') ?? '').trim(),
-        team: String(b.team ?? q.get('team') ?? '').trim().toUpperCase()
+        team: String(b.team ?? q.get('team') ?? '').trim().toUpperCase(),
+        token: clientToken
       })
       return sendJson(res, 200, out)
     }
@@ -281,12 +302,12 @@ export async function handleApi(req, res, url) {
       const competition = String(b.competition || '').trim()
       if (!competition) return sendJson(res, 400, { error: 'competition name or event SKU is required' })
 
-      const token = robotEventsToken()
+      const token = authToken
       const season = await currentSeason()
       if (!token) {
         return sendJson(res, 400, {
           error: `reviewing ${season.name} needs a RobotEvents API token`,
-          hint: 'Put ROBOTEVENTS_TOKEN in .env and restart the server. Public archives stop at 2020, so they cannot answer a current-season question.',
+          hint: 'Add your own key in the sidebar (it stays in your browser), or put ROBOTEVENTS_TOKEN in .env on the server. Public archives stop at 2020, so they cannot answer a current-season question.',
           season,
           tokenRequired: true
         })
@@ -297,7 +318,7 @@ export async function handleApi(req, res, url) {
       // An explicit pick, a pasted SKU, or a robotevents.com URL always wins.
       let sku = extractSku(b.pick) || extractSku(competition)
       if (!sku) {
-        const found = await findInSeason({ q: competition, team })
+        const found = await findInSeason({ q: competition, team, token: clientToken })
         candidates = found.competitions
         if (!candidates.length) {
           return sendJson(res, 404, {
@@ -486,7 +507,7 @@ export async function handleApi(req, res, url) {
     if (parts[0] === 'history' && method === 'GET') {
       const team = String(q.get('team') || '').trim().toUpperCase()
       if (!team) return sendJson(res, 400, { error: 'team required' })
-      const profile = await teamHistory(team, { fresh: q.get('fresh') === '1' })
+      const profile = await teamHistory(team, { fresh: q.get('fresh') === '1', token: clientToken })
       return sendJson(res, 200, profile)
     }
 
@@ -532,12 +553,12 @@ export async function handleApi(req, res, url) {
       const sku = String(b.sku || '').trim()
       const provider = 'robotevents'
       if (!sku) return sendJson(res, 400, { error: 'sku is required' })
-      const token = robotEventsToken()
+      const token = authToken
       const season = await currentSeason()
       if (!token) {
         return sendJson(res, 400, {
           error: `ingesting a ${season.name} event needs a RobotEvents token`,
-          hint: 'Put ROBOTEVENTS_TOKEN in .env and restart the server. Never commit it.',
+          hint: 'Add your own key in the sidebar, or put ROBOTEVENTS_TOKEN in .env on the server. Never commit it.',
           season,
           tokenRequired: true
         })
@@ -681,7 +702,8 @@ export async function handleApi(req, res, url) {
       return sendJson(res, 200, v)
     }
     if (sub === 'sim' && method === 'GET') {
-      const v = simulateView(sku, String(q.get('team') || '').trim().toUpperCase())
+      // Conceptual mode reads each team's season history, which needs the request's key.
+      const v = await simulateView(sku, String(q.get('team') || '').trim().toUpperCase(), { token: clientToken })
       if (!v) return sendJson(res, 404, { error: 'unknown team at this event' })
       return sendJson(res, 200, v)
     }

@@ -6,6 +6,8 @@ import { attributeMatch } from './engine/attribution.js'
 import { wpaTimeline, pFromScores } from './engine/winprob.js'
 import { prescribe } from './engine/prescribe.js'
 import { attackVectors, metricsFor } from './engine/counters.js'
+import { aggregateWeaknesses, eventWeaknesses, fieldBaseline, historyWeaknesses, topWeaknesses } from './engine/weakness.js'
+import { teamHistory } from './history.js'
 import { teamBriefing, matchPostMortem, eventDigest } from './engine/narrative.js'
 import { simulateAlliances, simulateMatchup } from './engine/sim.js'
 import { round, sum, mean, quantile, isElimRound, roundLabel } from './util.js'
@@ -642,36 +644,77 @@ export function onsiteView(sku, team) {
  * the field's median ally. That is stated in `model` and in the notes, because it flatters a
  * strong team less than assuming the best partner and is never a real bracket.
  */
-export function simulateView(sku, team) {
-  const a = analysis(sku)
-  if (!a) return null
-  const t = a.ratings.teams.get(team)
-  // Nothing to simulate when the event has no results, or when this team never played in it:
-  // a rating entry with zero matches would otherwise be simulated as if it were real form.
-  if (!t || t.matches === 0 || !a.ratings.matches.length) {
-    const row = db.get('SELECT * FROM teams WHERE sku = ? AND number = ?', sku, team)
-    if (!row) return null
-    return {
-      rosterOnly: true,
-      event: a.event,
-      team: { team: row.number, name: row.name, org: row.org, city: row.city, region: row.region, country: row.country },
-      counts: { opponents: 0, easy: 0, favorable: 0, even: 0, tough: 0, threat: 0 },
-      opponents: [],
-      watchlist: [],
-      gifts: [],
-      notes: [
-        a.ratings.matches.length
-          ? `${row.number} has no matches at ${a.event.name} yet, so there is nothing to simulate. Its team lab shows its previous tournaments.`
-          : `${a.event.name} has no scored matches yet, so there is nothing to simulate against. The team lab and onsite tab show this team's previous tournaments.`
-      ]
+/**
+ * Simulation view: one team against every other team in the event.
+ *
+ * This is the onsite matchup model run for the whole field at once, so the answer to "who do we
+ * need to prepare for" is a ranked list rather than a hunch. Each row carries the same numbers
+ * the team lab shows for a single matchup: win probability, projected score, margin band, the
+ * counters that fire against that opponent, and the weaknesses those counters exploit.
+ *
+ * Two modes, because an event that has not run has no results:
+ *  - `event`      — this team has played here; everything comes from the event's own matches.
+ *  - `conceptual` — nothing has been played yet (or not by this team); each team is described
+ *                   by its current-season results at the tournaments it already attended.
+ *                   Same thresholds, same simulation, clearly labelled basis.
+ *
+ * Both modes pad each alliance with the field's median ally, which is stated in `model` and in
+ * the notes: it flatters a strong team less than assuming the best partner, and it is never a
+ * prediction of a real bracket.
+ */
+const SIM_TIER = (p) => (p >= 0.7 ? 'easy' : p >= 0.58 ? 'favorable' : p >= 0.42 ? 'even' : p >= 0.3 ? 'tough' : 'threat')
+const r1 = (v) => (v == null ? null : round(v, 1))
+const upper = (v) => String(v ?? '').trim().toUpperCase()
+const medianOf = (values) => {
+  const vals = values.filter((v) => v != null && Number.isFinite(Number(v))).map(Number).sort((a, b) => a - b)
+  return vals.length ? vals[Math.floor(vals.length / 2)] : null
+}
+
+const tierCounts = (rows) => ({
+  opponents: rows.length,
+  easy: rows.filter((r) => r.tier === 'easy').length,
+  favorable: rows.filter((r) => r.tier === 'favorable').length,
+  even: rows.filter((r) => r.tier === 'even').length,
+  tough: rows.filter((r) => r.tier === 'tough').length,
+  threat: rows.filter((r) => r.tier === 'threat').length
+})
+
+const finishRows = (rows) => {
+  // Hardest first: the point of the tab is to find the problems, not to admire the easy draws.
+  rows.sort((x, y) => x.p - y.p || (y.elo ?? 0) - (x.elo ?? 0))
+  const meanP = rows.length ? mean(rows.map((r) => r.p)) : null
+  return {
+    rows,
+    counts: tierCounts(rows),
+    edge: {
+      meanP: meanP == null ? null : round(meanP, 3),
+      expectedWins: meanP == null ? null : round(meanP * rows.length, 1),
+      hardest: rows[0]?.team || null,
+      easiest: rows[rows.length - 1]?.team || null
     }
   }
+}
 
-  const r1 = (v) => (v == null ? null : round(v, 1))
+export async function simulateView(sku, team, { token = null } = {}) {
+  const a = analysis(sku)
+  if (!a) return null
+  const rosterRows = db.getTeams(sku)
+  const rating = a.ratings.teams.get(team)
+  const registered = rosterRows.some((r) => upper(r.number) === team)
+  if (!rating && !registered) return null
+  const scored = a.ratings.matches.filter(isScored)
+  const playedHere = scored.length > 0 && (rating?.matches ?? 0) > 0
+  return playedHere ? eventSimulation(a, team) : conceptualSimulation(a, team, rosterRows, { token })
+}
+
+/** Everything from this event's completed matches. */
+function eventSimulation(a, team) {
+  const t = a.ratings.teams.get(team)
   const sigma = a.ratings.sigmaMargin
   const partnerSd = 12
   const field = a.ratings.list.filter((x) => x.matches > 0 && x.team !== team)
   const partnerMu = field.length ? quantile(field.map((x) => x.mu), 0.5) : a.ratings.eventMean
+  const baseline = fieldBaseline(a.ratings.list)
   const ownCard = (num) => {
     const s = a.ratings.teams.get(num) || null
     return {
@@ -687,8 +730,10 @@ export function simulateView(sku, team) {
       matches: s?.matches ?? 0,
       wins: s?.wins ?? 0,
       losses: s?.losses ?? 0,
+      ties: s?.ties ?? 0,
       winRate: s?.winRate != null ? round(s.winRate, 3) : null,
-      rank: s?.rank ?? null
+      rank: s?.rank ?? null,
+      source: 'event'
     }
   }
 
@@ -725,8 +770,9 @@ export function simulateView(sku, team) {
       n: 2000
     })
     const av = attackVectors({ opponentNumber: o.team, ownNumber: team, ratings: a.ratings, archetypes: a.archetypes })
+    const all = eventWeaknesses(o, { vectors: av?.top || [], baseline })
     const p = sim.pA
-    const tier = p >= 0.7 ? 'easy' : p >= 0.58 ? 'favorable' : p >= 0.42 ? 'even' : p >= 0.3 ? 'tough' : 'threat'
+    const tier = SIM_TIER(p)
     return {
       ...ownCard(o.team),
       record: { wins: o.wins ?? 0, losses: o.losses ?? 0, ties: o.ties ?? 0 },
@@ -738,6 +784,8 @@ export function simulateView(sku, team) {
       projected: sim.mostLikely,
       margin: r1(sim.margin.p50),
       band: { own: sim.scoreA, opp: sim.scoreB },
+      weaknesses: topWeaknesses(all, 5),
+      weaknessCount: all.length,
       plan: av
         ? {
             winProb: av.winProb,
@@ -758,14 +806,13 @@ export function simulateView(sku, team) {
     }
   })
 
-  // Hardest first: the point of the tab is to find the problems, not to admire the easy draws.
-  rows.sort((x, y) => x.p - y.p || y.elo - x.elo)
-  const byTier = (name) => rows.filter((r) => r.tier === name)
-  const meanP = rows.length ? mean(rows.map((r) => r.p)) : null
+  const { counts, edge } = finishRows(rows)
 
   return {
     event: a.event,
-    team: ownCard(team),
+    mode: 'event',
+    basis: `completed matches at ${a.event.name}`,
+    team: { ...ownCard(team), record: { wins: t.wins, losses: t.losses, ties: t.ties } },
     style: a.archetypes.teams.get(team) || null,
     model: {
       sigmaMargin: sigma,
@@ -773,34 +820,255 @@ export function simulateView(sku, team) {
       partnerMu: r1(partnerMu),
       partnerSd,
       simulations: 2000,
-      calibration: a.ratings.calibration
+      calibration: a.ratings.calibration,
+      basis: 'event results'
     },
-    counts: {
-      opponents: rows.length,
-      easy: byTier('easy').length,
-      favorable: byTier('favorable').length,
-      even: byTier('even').length,
-      tough: byTier('tough').length,
-      threat: byTier('threat').length
-    },
-    edge: {
-      meanP: meanP == null ? null : round(meanP, 3),
-      expectedWins: meanP == null ? null : round(meanP * rows.length, 1),
-      hardest: rows[0]?.team || null,
-      easiest: rows[rows.length - 1]?.team || null,
-      examplePartner: r1(partnerMu)
-    },
+    counts,
+    edge: { ...edge, examplePartner: r1(partnerMu) },
     watchlist: rows.filter((r) => r.tier === 'threat' || r.tier === 'tough').slice(0, 8),
     gifts: [...rows].filter((r) => r.tier === 'easy' || r.tier === 'favorable').sort((x, y) => y.p - x.p).slice(0, 8),
     opponents: rows,
+    softSpots: aggregateWeaknesses(rows),
     distribution: histogram(rows.map((r) => r.p), 0.1),
     notes: [
       `Every opponent was simulated 2,000 times with a median ally (${r1(partnerMu)} pts) added to both sides, so this is matchup strength rather than a predicted bracket.`,
       `Win probabilities come from the same model as the onsite tab, with the field spread σ = ${sigma}.`,
-      `Sample sizes differ per team: ${rows.length} opponents, from ${Math.min(...rows.map((r) => r.matches))} to ${Math.max(...rows.map((r) => r.matches))} matches each.`
+      `Sample sizes differ per team: ${rows.length} opponents, from ${Math.min(...rows.map((r) => r.matches))} to ${Math.max(...rows.map((r) => r.matches))} matches each.`,
+      'Weaknesses are read from this event only: low floor, wide spread, penalty leakage, thin autonomous, a losing record, plus whatever the counter rules fired on.'
     ]
   }
 }
+
+/** Read season histories for the teams that have no usable event results. Cached by history.js. */
+async function seasonHistories(numbers, token) {
+  const out = new Map()
+  const queue = [...new Set(numbers.filter(Boolean))]
+  if (!queue.length) return out
+  const worker = async () => {
+    while (queue.length) {
+      const n = queue.shift()
+      try {
+        const h = await Promise.race([
+          teamHistory(n, { token }),
+          new Promise((_, reject) => {
+            const timer = setTimeout(() => reject(new Error('history timeout')), 12000)
+            if (timer.unref) timer.unref()
+          })
+        ])
+        if (h && h.matches) out.set(n, h)
+      } catch {
+        // A team with no readable season simply has no conceptual entry.
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()])
+  return out
+}
+
+/**
+ * Conceptual mode: the event has not produced results, so every number comes from what each
+ * team has already done this season. It answers the same question — who is a problem, who is a
+ * free win — from evidence that exists before the first qualification match.
+ */
+async function conceptualSimulation(a, team, rosterRows, { token }) {
+  const names = new Map(rosterRows.map((r) => [upper(r.number), r.name || null]))
+  const scoredHere = a.ratings.matches.some(isScored)
+  const fromEvent = (n) => {
+    const r = a.ratings.teams.get(n)
+    return scoredHere && r && r.matches > 0 ? r : null
+  }
+  const numbers = [
+    ...new Set([...rosterRows.map((r) => upper(r.number)), ...(scoredHere ? a.ratings.list.map((x) => x.team) : []), team].filter(Boolean))
+  ]
+  const opponents = numbers.filter((n) => n !== team)
+  const needHistory = [team, ...opponents].filter((n) => !fromEvent(n))
+  const history = await seasonHistories(needHistory, token)
+  const ownEvent = fromEvent(team)
+  const ownSeason = history.get(team) || null
+  const partnerSd = 12
+  const sigma = a.ratings.sigmaMargin ?? 18
+
+  const share = (h) => (h?.avgScore != null ? h.avgScore / 3 : null)
+  const spread = (h) => Math.max(6, (h?.sd ?? 18) / 3)
+
+  const ownMu = ownEvent?.mu ?? share(ownSeason)
+  const ownSd = ownEvent?.sdPoints ?? spread(ownSeason)
+
+  if (ownMu == null) {
+    return {
+      rosterOnly: true,
+      mode: 'conceptual',
+      needsHistory: true,
+      event: a.event,
+      team: { team, name: names.get(team) || null, source: 'roster' },
+      roster: numbers.map((n) => ({ team: n, name: names.get(n) || null })),
+      counts: { opponents: 0, easy: 0, favorable: 0, even: 0, tough: 0, threat: 0 },
+      opponents: [],
+      watchlist: [],
+      gifts: [],
+      softSpots: [],
+      notes: [
+        `${team} has no completed matches at ${a.event.name} yet and no readable ${a.event.season || 'current-season'} results, so there is nothing honest to simulate from.`,
+        'Paste a RobotEvents key in the sidebar (it stays in your browser) and the previous tournaments become available; cached seasons need no key at all.'
+      ]
+    }
+  }
+
+  const fieldStats = opponents
+    .map((n) => {
+      const ev = fromEvent(n)
+      const h = history.get(n) || null
+      if (!ev && !h) return null
+      return { n, ev, h, mu: ev ? ev.mu : share(h), sd: ev ? (ev.sdPoints ?? partnerSd) : spread(h) }
+    })
+    .filter((s) => s && s.mu != null)
+
+  const partnerMu = medianOf(fieldStats.map((s) => s.mu)) ?? ownMu
+  const eventBaseline = fieldBaseline(a.ratings.list)
+  const historyBaseline = fieldBaseline(
+    fieldStats.map((s) => ({
+      matches: s.h?.matches ?? 0,
+      cv: s.h?.cv ?? null,
+      floor: s.h?.floor ?? null,
+      avgPoints: s.h?.avgScore ?? null,
+      winRate: s.h?.winRate ?? null
+    }))
+  )
+  const seasonBase = {
+    ...historyBaseline,
+    avgScore: medianOf(fieldStats.map((s) => s.h?.avgScore)),
+    cv: medianOf(fieldStats.map((s) => s.h?.cv)),
+    floor: medianOf(fieldStats.map((s) => s.h?.floor))
+  }
+
+  const rows = fieldStats.map(({ n, ev, h, mu, sd }) => {
+    const sim = simulateMatchup({
+      muA: ownMu + partnerMu,
+      muB: mu + partnerMu,
+      sigmaA: Math.sqrt(ownSd ** 2 + partnerSd ** 2),
+      sigmaB: Math.sqrt(sd ** 2 + partnerSd ** 2),
+      n: 2000
+    })
+    const all = ev ? eventWeaknesses(ev, { baseline: eventBaseline }) : historyWeaknesses(h, { baseline: seasonBase })
+    const p = sim.pA
+    const wins = ev?.wins ?? h?.wins ?? 0
+    const losses = ev?.losses ?? h?.losses ?? 0
+    const ties = ev?.ties ?? h?.ties ?? 0
+    return {
+      team: n,
+      name: ev?.name || names.get(n) || null,
+      archetype: ev ? a.archetypes.teams.get(n)?.archetype || null : null,
+      elo: ev?.elo ?? null,
+      opr: r1(ev?.opr),
+      avgPoints: r1(ev?.avgPoints ?? h?.avgScore),
+      floor: r1(ev?.floor ?? h?.floor),
+      ceiling: r1(ev?.ceiling ?? h?.ceiling),
+      sdPoints: r1(ev?.sdPoints ?? h?.sd),
+      matches: ev?.matches ?? h?.matches ?? 0,
+      wins,
+      losses,
+      ties,
+      winRate: ev?.winRate ?? h?.winRate ?? null,
+      rank: ev?.rank ?? null,
+      record: { wins, losses, ties },
+      season: h
+        ? {
+            matches: h.matches,
+            wins: h.wins,
+            losses: h.losses,
+            ties: h.ties,
+            events: (h.events || []).length,
+            avgMargin: h.avgMargin,
+            avgOpp: h.avgOpp,
+            lastPlayed: h.lastPlayed,
+            form: (h.form || []).slice(0, 4),
+            stale: Boolean(h.stale)
+          }
+        : null,
+      source: ev ? 'event' : 'season',
+      mu: r1(mu),
+      p: round(p, 4),
+      modelP: sim.modelP,
+      tier: SIM_TIER(p),
+      projected: sim.mostLikely,
+      margin: r1(sim.margin.p50),
+      band: { own: sim.scoreA, opp: sim.scoreB },
+      weaknesses: topWeaknesses(all, 5),
+      weaknessCount: all.length,
+      plan: null,
+      h2h: { played: 0, wins: 0, losses: 0, matches: [] }
+    }
+  })
+
+  const { counts, edge } = finishRows(rows)
+  const withSeason = rows.filter((r) => r.source === 'season').length
+
+  return {
+    event: a.event,
+    mode: 'conceptual',
+    basis: scoredHere ? 'your side from season results, opponents from this event' : 'each team’s current-season results before this event',
+    team: {
+      team,
+      name: ownEvent?.name || names.get(team) || null,
+      archetype: ownEvent ? a.archetypes.teams.get(team)?.archetype || null : null,
+      elo: ownEvent?.elo ?? null,
+      opr: r1(ownEvent?.opr),
+      avgPoints: r1(ownEvent?.avgPoints ?? ownSeason?.avgScore),
+      floor: r1(ownEvent?.floor ?? ownSeason?.floor),
+      ceiling: r1(ownEvent?.ceiling ?? ownSeason?.ceiling),
+      sdPoints: r1(ownSd),
+      matches: ownEvent?.matches ?? ownSeason?.matches ?? 0,
+      wins: ownEvent?.wins ?? ownSeason?.wins ?? 0,
+      losses: ownEvent?.losses ?? ownSeason?.losses ?? 0,
+      ties: ownEvent?.ties ?? ownSeason?.ties ?? 0,
+      winRate: ownEvent?.winRate ?? ownSeason?.winRate ?? null,
+      rank: ownEvent?.rank ?? null,
+      record: {
+        wins: ownEvent?.wins ?? ownSeason?.wins ?? 0,
+        losses: ownEvent?.losses ?? ownSeason?.losses ?? 0,
+        ties: ownEvent?.ties ?? ownSeason?.ties ?? 0
+      },
+      season: ownSeason
+        ? {
+            matches: ownSeason.matches,
+            wins: ownSeason.wins,
+            losses: ownSeason.losses,
+            ties: ownSeason.ties,
+            events: (ownSeason.events || []).length,
+            avgMargin: ownSeason.avgMargin,
+            lastPlayed: ownSeason.lastPlayed,
+            form: (ownSeason.form || []).slice(0, 4)
+          }
+        : null,
+      source: ownEvent ? 'event' : 'season'
+    },
+    style: null,
+    model: {
+      sigmaMargin: r1(sigma),
+      eventMean: r1(a.ratings.eventMean),
+      partnerMu: r1(partnerMu),
+      partnerSd,
+      simulations: 2000,
+      calibration: null,
+      basis: 'season results'
+    },
+    counts,
+    edge: { ...edge, examplePartner: r1(partnerMu) },
+    watchlist: rows.filter((r) => r.tier === 'threat' || r.tier === 'tough').slice(0, 8),
+    gifts: [...rows].filter((r) => r.tier === 'easy' || r.tier === 'favorable').sort((x, y) => y.p - x.p).slice(0, 8),
+    opponents: rows,
+    softSpots: aggregateWeaknesses(rows),
+    distribution: histogram(rows.map((r) => r.p), 0.1),
+    notes: [
+      `${team} has no completed matches at ${a.event.name} yet, so nothing here is a result from this event — it is the field's season so far.`,
+      `Each team's expected points are its average alliance score divided by three, so the units match the event model and both sides carry the same median ally (${r1(partnerMu)} pts).`,
+      `${withSeason} of ${rows.length} opponents are described by their previous tournaments (record, floor, ceiling, form); the rest already have results here.`,
+      'Weaknesses come from that season: below-field scoring, a losing record, a wide spread, poor recent form, too thin a sample to trust.',
+      'A key in the sidebar lets the server read seasons it has not cached yet; cached teams simulate without one.'
+    ]
+  }
+}
+
 
 export function metaView(sku) {
   const a = analysis(sku)

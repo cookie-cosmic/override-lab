@@ -25,7 +25,7 @@ export function cachedHistory(team) {
   }
 }
 
-export async function teamHistory(team, { fresh = false } = {}) {
+export async function teamHistory(team, { fresh = false, token: supplied = null } = {}) {
   const number = upper(team)
   if (!number) throw Object.assign(new Error('team required'), { status: 400 })
   const cached = cachedHistory(number)
@@ -33,10 +33,11 @@ export async function teamHistory(team, { fresh = false } = {}) {
   if (!fresh && cached && age < TTL) return cached
 
   const season = await currentSeason()
-  const token = robotEventsToken()
+  // A token pasted in the UI wins over the server's own, so a deployment without one still works.
+  const token = supplied || robotEventsToken()
   if (!token) {
     if (cached) return { ...cached, stale: true }
-    throw Object.assign(new Error('team history needs ROBOTEVENTS_TOKEN in .env'), { status: 400 })
+    throw Object.assign(new Error('team history needs a RobotEvents token — add one on the server or paste your own in the sidebar'), { status: 400 })
   }
 
   const client = new RobotEvents(token)

@@ -5,10 +5,36 @@ import { useCallback, useEffect, useState } from 'react'
 // empty, so those requests stay relative and unchanged.
 const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 
+// A key the user pasted themselves. It stays in this browser and rides along as a header on
+// every request, so a deployment whose own token is missing or rejected still works.
+const TOKEN_KEY = 'vex-api-token'
+
+export function getApiToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function setApiToken(value) {
+  try {
+    if (value) localStorage.setItem(TOKEN_KEY, value)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* private mode can refuse storage; the key simply is not remembered */
+  }
+}
+
 export async function api(path, opts = {}) {
+  const token = getApiToken()
   const res = await fetch(API_BASE + path, {
-    headers: { 'content-type': 'application/json' },
-    ...opts
+    ...opts,
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { 'x-robotevents-token': token } : {}),
+      ...(opts.headers || {})
+    }
   })
   const type = res.headers.get('content-type') || ''
   const payload = type.includes('json') ? await res.json().catch(() => null) : await res.text()
@@ -37,7 +63,8 @@ export const endpoints = {
   history: (team, fresh) => `/api/history?team=${enc(team)}${fresh ? '&fresh=1' : ''}`,
   meta: (sku) => `/api/events/${enc(sku)}/meta`,
   videos: (sku) => `/api/events/${enc(sku)}/videos`,
-  report: (sku, team) => `/api/events/${enc(sku)}/report${team ? `?team=${enc(team)}` : ''}`
+  report: (sku, team) => `/api/events/${enc(sku)}/report${team ? `?team=${enc(team)}` : ''}`,
+  tokenCheck: () => '/api/token/check'
 }
 
 export function useApi(path, deps = []) {

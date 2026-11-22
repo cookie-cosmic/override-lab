@@ -2,6 +2,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { handleApi } from './routes.js'
 import { clearTransients, expireTransients } from './db.js'
@@ -22,8 +23,49 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
 const CORS_HEADERS = {
   'access-control-allow-origin': CORS_ORIGIN,
   'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-  'access-control-allow-headers': 'content-type',
+  // x-robotevents-token carries a key the user pasted into the UI; it is never stored here.
+  'access-control-allow-headers': 'content-type,x-robotevents-token',
   'access-control-max-age': '86400'
+}
+
+// gzip for text and JSON when the browser asks for it. The API's payloads run from tens to
+// hundreds of kilobytes and a phone on a school network feels every byte of that.
+function enableCompression(req, res) {
+  if (!/\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''))) return
+  const writeHead = res.writeHead.bind(res)
+  const end = res.end.bind(res)
+  let staged = null
+  res.writeHead = (...args) => {
+    const headers = typeof args[1] === 'string' ? args[2] : args[1]
+    staged = { status: args[0], headers: { ...(headers || {}) } }
+    return res
+  }
+  res.end = (chunk, encoding, cb) => {
+    let body = typeof chunk === 'string' ? Buffer.from(chunk, encoding || 'utf8') : chunk
+    const meta = staged || { status: res.statusCode, headers: {} }
+    const headers = { ...meta.headers }
+    if (body == null) {
+      writeHead(meta.status, headers)
+      return end()
+    }
+    if (!Buffer.isBuffer(body)) {
+      writeHead(meta.status, headers)
+      return end(body, encoding, cb)
+    }
+    const type = String(headers['content-type'] || '')
+    if (body.length >= 512 && /^(text\/|application\/(json|javascript|xml|manifest))/i.test(type)) {
+      const gz = zlib.gzipSync(body, { level: 6 })
+      // Below ~10% saving the header is not worth the extra work on the client.
+      if (gz.length < body.length * 0.9) {
+        body = gz
+        headers['content-encoding'] = 'gzip'
+        headers['content-length'] = String(gz.length)
+        headers.vary = headers.vary ? `${headers.vary}, accept-encoding` : 'accept-encoding'
+      }
+    }
+    writeHead(meta.status, headers)
+    return end(body, undefined, cb)
+  }
 }
 
 const MIME = {
@@ -91,6 +133,7 @@ const server = http.createServer(async (req, res) => {
     res.end('bad request')
     return
   }
+  enableCompression(req, res)
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
     // Cross-origin POSTs send application/json, which always asks permission first.
     if (req.method === 'OPTIONS') {
@@ -113,6 +156,18 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Override Lab listening on http://${HOST}:${PORT}`)
 })
+
+// Render's free plan suspends a service after ~15 idle minutes. One request every ten minutes
+// keeps it warm, so the site is up around the clock instead of cold-starting on the morning's
+// first visit. Render sets RENDER_EXTERNAL_URL itself; KEEP_ALIVE_URL overrides it.
+const KEEP_ALIVE = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || ''
+if (KEEP_ALIVE) {
+  const target = `${KEEP_ALIVE.replace(/\/+$/, '')}/api/health`
+  const ping = () => fetch(target, { headers: { 'user-agent': 'override-lab-keepalive' } }).catch(() => {})
+  setTimeout(ping, 60 * 1000).unref()
+  setInterval(ping, 10 * 60 * 1000).unref()
+  console.log(`keep-alive ping every 10 min → ${target}`)
+}
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {

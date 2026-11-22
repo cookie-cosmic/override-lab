@@ -31,6 +31,7 @@ export default function Start({ navigate }) {
 
   const [season, setSeason] = useState(null)
   const [tokenKnown, setTokenKnown] = useState(false)
+  const [tokenSource, setTokenSource] = useState(null)
   const [schedule, setSchedule] = useState(null)
   const [scheduleBusy, setScheduleBusy] = useState(false)
   const [eventScope, setEventScope] = useState('team')
@@ -45,6 +46,7 @@ export default function Start({ navigate }) {
       .then((r) => {
         setSeason(r.season || null)
         setTokenKnown(Boolean(r.token))
+        setTokenSource(r.tokenSource || null)
       })
       .catch(() => {})
   }, [])
@@ -195,8 +197,10 @@ export default function Start({ navigate }) {
         <div style={{ marginTop: 10 }}>
           <Note tone={hasToken ? 'good' : 'warn'}>
             {tokenKnown
-              ? 'RobotEvents access is configured on the server, so current-season events can be read.'
-              : 'No RobotEvents token on the server yet — add ROBOTEVENTS_TOKEN to .env and restart. The public archives stop at 2020, so nothing current-season can be read without it.'}
+              ? tokenSource === 'client'
+                ? 'Your own RobotEvents key is being used from this browser, so current-season events can be read.'
+                : 'RobotEvents access is configured on the server, so current-season events can be read.'
+              : 'No RobotEvents token yet — paste your own in the sidebar (the ⌘ key at the bottom) or set ROBOTEVENTS_TOKEN on the server. The public archives stop at 2020, so nothing current-season can be read without one.'}
           </Note>
         </div>
       </Card>

@@ -11,6 +11,7 @@ import Sim from './views/Sim.jsx'
 import Stream from './views/Stream.jsx'
 import Start from './views/Start.jsx'
 import { Empty, Btn } from './components/ui.jsx'
+import ApiKey from './components/ApiKey.jsx'
 import { THEMES, useTheme } from './theme.js'
 
 const ROUTES = [
@@ -206,6 +207,7 @@ export default function App() {
         </nav>
 
         <div className="spacer" />
+        <ApiKey />
         <div className="sidebar-foot">Model estimates, not an official VEX product.</div>
       </aside>
 
