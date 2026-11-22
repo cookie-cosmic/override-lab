@@ -62,6 +62,14 @@ export default function Matches({ sku, navigate, matchKey }) {
           }
           flush
         >
+          {!(data.matches || []).length && (
+            <div style={{ padding: '12px 16px 0' }}>
+              <Note>
+                Nothing is in the archive for this event yet. A running tournament publishes its schedule here once RobotEvents has it —
+                use ⟳ sync in the top bar to pull the latest.
+              </Note>
+            </div>
+          )}
           <div className="table-wrap" style={{ maxHeight: '72vh' }}>
             <table className="table clickable">
               <thead>

@@ -114,7 +114,7 @@ export default function Sim({ sku, team, navigate }) {
       </Field>
       <span className="tiny dim">
         {teams.length ? `${teams.length} teams at this event` : 'this event has no roster yet'} · every opponent is simulated 2,000 times
-        with a median ally on both sides
+        with two median allies on both sides
       </span>
     </Card>
   )

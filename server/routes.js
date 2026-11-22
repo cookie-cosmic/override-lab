@@ -407,12 +407,14 @@ export async function handleApi(req, res, url) {
 
       const tried = []
       let bundle = null
+      let directBundle = null
       let division = b.division || null
       let scored = 0
       try {
         // The bundle picks the division off the matches, so no separate lookup is needed.
         const candidateBundle = await client.fetchEventBundle(sku, { team, division: b.division || null })
-        const candidateScored = candidateBundle.matches.filter((m) => m.redscore != null && m.bluescore != null).length
+        directBundle = candidateBundle
+        const candidateScored = candidateBundle.matches.filter((m) => (m.red_score ?? m.redscore) != null && (m.blue_score ?? m.bluescore) != null).length
         tried.push({ sku, name: candidateBundle.event.name, matches: candidateBundle.matches.length, scored: candidateScored })
         if (candidateScored > 0) {
           bundle = candidateBundle
@@ -441,6 +443,13 @@ export async function handleApi(req, res, url) {
             tried.push({ sku: cand.sku, error: e.message })
           }
         }
+      }
+      // A tournament that is running has a schedule before it has scores. Opening it is more
+      // useful than refusing: the match list, the roster and every season-based tool work.
+      if (!bundle && directBundle && directBundle.matches.length) {
+        bundle = directBundle
+        division = directBundle.teamDivision || division
+        scored = 0
       }
       if (!bundle) {
         return sendJson(res, 422, {
@@ -492,6 +501,8 @@ export async function handleApi(req, res, url) {
         teams: bundle.teams.length,
         matches: bundle.matches.length,
         scored,
+        // Scores pending: the schedule is real, the ratings are not there yet.
+        noScores: scored === 0,
         transient: true,
         intake: bundle.intake || null,
         video,
@@ -692,9 +703,51 @@ export async function handleApi(req, res, url) {
       return sendJson(res, 200, v)
     }
     if (sub === 'opponent' && method === 'GET') {
-      const v = opponentView(sku, q.get('team'), q.get('own'))
+      // Deep opponent sheet: event results when they exist, the team's season when they do not.
+      const v = await opponentView(
+        sku,
+        String(q.get('team') || '').trim().toUpperCase(),
+        q.get('own') ? String(q.get('own')).trim().toUpperCase() : null,
+        { token: clientToken }
+      )
       if (!v) return sendJson(res, 404, { error: 'unknown team' })
       return sendJson(res, 200, v)
+    }
+    if (sub === 'refresh' && method === 'POST') {
+      // Pull the tournament again as it runs, without losing video links or alignments.
+      const existing = db.getEvent(sku)
+      if (!existing) return sendJson(res, 404, { error: 'unknown event' })
+      if (!authToken) {
+        return sendJson(res, 400, {
+          error: `syncing ${sku} needs a RobotEvents token`,
+          hint: 'Add your own key in the sidebar (it stays in your browser), or set ROBOTEVENTS_TOKEN on the server.',
+          tokenRequired: true
+        })
+      }
+      const b = await body(req)
+      const team = String(b.team || q.get('team') || '').trim().toUpperCase() || null
+      const startT = Date.parse(existing.start_date || '')
+      const ahead = !Number.isNaN(startT) && startT > Date.now() + 86400000
+      let bundle
+      try {
+        bundle = await new RobotEvents(authToken).fetchEventBundle(sku, ahead ? { rosterOnly: true } : { team })
+      } catch (e) {
+        return sendJson(res, 502, { error: e.message })
+      }
+      const kept = db.refreshEventBundle(bundle)
+      invalidate(sku)
+      const scored = bundle.matches.filter((m) => (m.red_score ?? m.redscore) != null && (m.blue_score ?? m.bluescore) != null).length
+      return sendJson(res, 200, {
+        ok: true,
+        sku,
+        teams: bundle.teams.length,
+        matches: bundle.matches.length,
+        scored,
+        upcoming: ahead,
+        videos: kept.videos,
+        aligned: kept.aligned,
+        fetchedAt: new Date().toISOString()
+      })
     }
     if (sub === 'onsite' && method === 'GET') {
       const v = onsiteView(sku, String(q.get('team') || '').trim().toUpperCase())

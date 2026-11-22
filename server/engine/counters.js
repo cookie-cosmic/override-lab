@@ -61,14 +61,15 @@ export function metricsFor(team, styleEntry) {
   }
 }
 
-export function attackVectors({ opponentNumber, ownNumber, ratings, archetypes }) {
-  const opp = ratings.teams.get(opponentNumber)
-  if (!opp) return null
-  const own = ownNumber ? ratings.teams.get(ownNumber) : null
-  const oppMetrics = metricsFor(opp, archetypes?.teams.get(opponentNumber))
-  const ownMetrics = own ? metricsFor(own, archetypes?.teams.get(ownNumber)) : null
+/**
+ * Evaluate the rule base against one opponent's metrics.
+ *
+ * Metrics may come from an event (metricsFor) or from a team's season history, which is what
+ * makes counters work before the event has produced a single score: a rule simply cannot fire
+ * on a metric that does not exist, and coverage says which ones those were.
+ */
+export function vectorsFromMetrics(oppMetrics, ownMetrics = null) {
   const rules = loadRules().rules || []
-
   const vectors = []
   for (const r of rules) {
     const observed = oppMetrics[r.when.metric]
@@ -100,17 +101,18 @@ export function attackVectors({ opponentNumber, ownNumber, ratings, archetypes }
     })
   }
   vectors.sort((a, b) => b.score - a.score)
+  return vectors
+}
+
+/** The plan around a set of vectors: point swing, win probability, roles, triggers, coverage. */
+export function planFromVectors({ vectors = [], oppMetrics = {}, muOpp = 0, muOwn = 0, sigmaMargin = 20, archetype = null }) {
+  const rules = loadRules().rules || []
   const top = vectors.slice(0, 4)
   const swing = sum(top.map((v) => v.expectedPoints * v.capability)) * 0.5
-  const muOpp = opp.mu
-  const muOwn = own?.mu ?? ratings.eventMean
-  const baseP = pFromScores(muOwn, muOpp, ratings.sigmaMargin)
-  const planP = pFromScores(muOwn + swing * 0.4, muOpp - swing * 0.6, ratings.sigmaMargin)
-
+  const baseP = pFromScores(muOwn, muOpp, sigmaMargin)
+  const planP = pFromScores(muOwn + swing * 0.4, muOpp - swing * 0.6, sigmaMargin)
   return {
-    opponent: opponentNumber,
-    own: ownNumber || null,
-    archetype: archetypes?.teams.get(opponentNumber)?.archetype || null,
+    archetype,
     metrics: oppMetrics,
     vectors,
     top,
@@ -123,8 +125,32 @@ export function attackVectors({ opponentNumber, ownNumber, ratings, archetypes }
     coverage: {
       rulesEvaluated: rules.length,
       rulesFired: vectors.length,
-      metricsMissing: rules.map((r) => r.when.metric).filter((m) => oppMetrics[m] == null).filter((m, i, a) => a.indexOf(m) === i)
+      metricsMissing: rules
+        .map((r) => r.when.metric)
+        .filter((m) => oppMetrics[m] == null)
+        .filter((m, i, a) => a.indexOf(m) === i)
     },
     rulesVersion: loadRules().version
+  }
+}
+
+export function attackVectors({ opponentNumber, ownNumber, ratings, archetypes }) {
+  const opp = ratings.teams.get(opponentNumber)
+  if (!opp) return null
+  const own = ownNumber ? ratings.teams.get(ownNumber) : null
+  const oppMetrics = metricsFor(opp, archetypes?.teams.get(opponentNumber))
+  const ownMetrics = own ? metricsFor(own, archetypes?.teams.get(ownNumber)) : null
+  const vectors = vectorsFromMetrics(oppMetrics, ownMetrics)
+  return {
+    opponent: opponentNumber,
+    own: ownNumber || null,
+    ...planFromVectors({
+      vectors,
+      oppMetrics,
+      muOpp: opp.mu,
+      muOwn: own?.mu ?? ratings.eventMean,
+      sigmaMargin: ratings.sigmaMargin,
+      archetype: archetypes?.teams.get(opponentNumber)?.archetype || null
+    })
   }
 }

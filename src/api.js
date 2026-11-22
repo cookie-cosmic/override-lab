@@ -64,6 +64,7 @@ export const endpoints = {
   meta: (sku) => `/api/events/${enc(sku)}/meta`,
   videos: (sku) => `/api/events/${enc(sku)}/videos`,
   report: (sku, team) => `/api/events/${enc(sku)}/report${team ? `?team=${enc(team)}` : ''}`,
+  refresh: (sku) => `/api/events/${enc(sku)}/refresh`,
   tokenCheck: () => '/api/token/check'
 }
 

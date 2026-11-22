@@ -28,6 +28,32 @@ export default function Overview({ sku, navigate }) {
   const cal = s.model?.calibration || {}
   const dist = s.distributions || {}
 
+  // A future event has a roster and nothing else; leaderboards built from zero matches are
+  // noise, so the overview shows the field and points at the tools that work.
+  if (s.rosterOnly) {
+    return (
+      <div>
+        <Note tone="warn">{s.notes?.[0]}</Note>
+        <Card
+          title="Registered teams"
+          subtitle={`${s.count?.teams ?? s.roster?.length ?? 0} teams entered — open one for its season, or run the simulation`}
+        >
+          <Table head={['Team', 'Name', 'Location']} wrap={false} maxHeight={520}>
+            {(s.roster || []).map((r) => (
+              <tr key={r.team} className="clickable" onClick={() => openTeam(r.team)} style={{ cursor: 'pointer' }}>
+                <td>
+                  <TeamTag team={r.team} />
+                </td>
+                <td className="small">{r.name || '—'}</td>
+                <td className="small dim">{[r.city, r.region].filter(Boolean).join(', ') || '—'}</td>
+              </tr>
+            ))}
+          </Table>
+        </Card>
+      </div>
+    )
+  }
+
   const lbRows =
     lb === 'skills'
       ? (s.leaderboards.skills || []).map((t, i) => (
@@ -54,6 +80,7 @@ export default function Overview({ sku, navigate }) {
 
   return (
     <div>
+      {s.noScores && <Note tone="warn">{s.notes?.[0]}</Note>}
       <div className="grid g4" style={{ marginBottom: 16 }}>
         <Stat label="Teams analysed" value={s.count.teams} sub={`${s.count.matches} matches · ${s.count.scored} scored`} />
         <Stat label="Median win margin" value={fmt(dist.medianMargin)} sub={`${dist.close} inside 5 pts · ${dist.blowouts} by 25+`} />

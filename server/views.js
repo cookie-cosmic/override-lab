@@ -5,12 +5,12 @@ import { teamsOf, isScored } from './engine/ratings.js'
 import { attributeMatch } from './engine/attribution.js'
 import { wpaTimeline, pFromScores } from './engine/winprob.js'
 import { prescribe } from './engine/prescribe.js'
-import { attackVectors, metricsFor } from './engine/counters.js'
+import { attackVectors, metricsFor, planFromVectors, vectorsFromMetrics } from './engine/counters.js'
 import { aggregateWeaknesses, eventWeaknesses, fieldBaseline, historyWeaknesses, topWeaknesses } from './engine/weakness.js'
 import { teamHistory } from './history.js'
 import { teamBriefing, matchPostMortem, eventDigest } from './engine/narrative.js'
 import { simulateAlliances, simulateMatchup } from './engine/sim.js'
-import { round, sum, mean, quantile, isElimRound, roundLabel } from './util.js'
+import { round, sum, mean, quantile, pctRank, isElimRound, roundLabel } from './util.js'
 
 const winnerOf = (m) => (m.red_score == null || m.blue_score == null ? null : m.red_score > m.blue_score ? 'red' : m.red_score < m.blue_score ? 'blue' : 'tie')
 
@@ -219,7 +219,13 @@ export function summary(sku) {
       clusters: archetypes.clusters,
       teams: [...archetypes.teams.values()]
     },
-    quality
+    quality,
+    // A running event has a schedule before it has a single score. Says so instead of
+    // pretending the empty leaderboards mean an empty field.
+    noScores: scored.length === 0,
+    notes: scored.length
+      ? []
+      : [`${event.name} has matches on the schedule but no final scores yet — simulation and counters fall back to each team's season until the first result lands.`]
   }
 }
 
@@ -356,10 +362,10 @@ export function teamView(sku, team, vs = null) {
     : []
   const sim = vs
     ? simulateMatchup({
-        muA: t.mu + partnerMu,
-        muB: (a.ratings.teams.get(vs)?.mu ?? a.ratings.eventMean) + partnerMu,
-        sigmaA: Math.sqrt((t.sdPoints ?? 12) ** 2 + 12 ** 2),
-        sigmaB: Math.sqrt(((a.ratings.teams.get(vs)?.sdPoints ?? 12) ** 2) + 12 ** 2),
+        muA: t.mu + 2 * partnerMu,
+        muB: (a.ratings.teams.get(vs)?.mu ?? a.ratings.eventMean) + 2 * partnerMu,
+        sigmaA: Math.sqrt((t.sdPoints ?? 12) ** 2 + 2 * 12 ** 2),
+        sigmaB: Math.sqrt(((a.ratings.teams.get(vs)?.sdPoints ?? 12) ** 2) + 2 * 12 ** 2),
         n: 5000
       })
     : null
@@ -408,43 +414,425 @@ export function teamView(sku, team, vs = null) {
   }
 }
 
-export function opponentView(sku, team, own = null) {
-  const a = analysis(sku)
-  if (!a) return null
+// ---- opponent & counters --------------------------------------------------------------
+//
+// One opponent, read deeply from whichever evidence exists:
+//  - event mode: the matches it played here (ratings, percentiles, form, head-to-head), or
+//  - conceptual mode: its season at the tournaments before this one, so the counter sheet is
+//    usable in the pit before the event has produced a single score.
+//
+// Both paths end in the same shape: strengths, weaknesses, every rule that fired, a plan with
+// its expected point swing, and a simulated score distribution against your team.
+
+const RATING_PCT = [
+  { key: 'avgPoints', label: 'average points', dir: 'desc', unit: 'pts per match' },
+  { key: 'floor', label: 'floor', dir: 'desc', unit: 'pts' },
+  { key: 'ceiling', label: 'ceiling', dir: 'desc', unit: 'pts' },
+  { key: 'autonPerMatch', label: 'autonomous', dir: 'desc', unit: 'auton pts' },
+  { key: 'driverPerMatch', label: 'driver phase', dir: 'desc', unit: 'driver pts' },
+  { key: 'penaltyPerMatch', label: 'penalty discipline', dir: 'asc', unit: 'penalty pts' },
+  { key: 'clutch', label: 'elimination form', dir: 'desc', unit: 'pts' }
+]
+
+function percentileOf(team, field, key, dir = 'desc', pick = (t) => t[key]) {
+  const v = pick(team)
+  if (v == null) return null
+  const vals = field.map(pick).filter((z) => z != null && Number.isFinite(z))
+  if (vals.length < 4) return null
+  // pctRank counts values below x, so for "lower is better" the rank flips.
+  const better = dir === 'desc' ? pctRank(vals, v) : 1 - pctRank(vals, v)
+  return round(better, 3)
+}
+
+function ratingStrengths(team, field) {
+  const out = []
+  for (const check of RATING_PCT) {
+    const p = percentileOf(team, field, check.key, check.dir)
+    const v = team[check.key]
+    if (p == null || p < 0.75) continue
+    out.push({
+      id: check.key,
+      label: check.label,
+      detail: `${round(v, 1)} ${check.unit} — better than ${Math.round(p * 100)}% of the field`,
+      percentile: p
+    })
+  }
+  const prog = percentileOf(team, field, 'prog', 'desc', (t) => t.skills?.prog)
+  if (prog != null && prog >= 0.75) {
+    out.push({ id: 'prog', label: 'programming skills', detail: `${round(team.skills?.prog, 0)} pts — top quarter of the field`, percentile: prog })
+  }
+  return out.sort((x, y) => y.percentile - x.percentile)
+}
+
+/** The same metric names the counter rules use, read from a season instead of an event. */
+function historyMetrics(h) {
+  if (!h) return {}
+  return {
+    avgPoints: h.avgScore,
+    floor: h.floor,
+    ceiling: h.ceiling,
+    spread: h.floor != null && h.ceiling != null ? round(h.ceiling - h.floor, 1) : null,
+    cv: h.cv,
+    consistency: h.cv != null ? round(1 - h.cv, 3) : null,
+    winRate: h.winRate,
+    avgMargin: h.avgMargin,
+    matches: h.matches,
+    autonPerMatch: null,
+    driverPerMatch: null,
+    penaltyPerMatch: null,
+    clutch: null,
+    rank: null,
+    opr: null,
+    elo: null
+  }
+}
+
+function seasonStrengths(h) {
+  if (!h || !h.matches) return []
+  const out = []
+  if (h.winRate != null && h.winRate >= 0.6) {
+    out.push({ id: 'record', label: 'winning season', detail: `${h.wins}–${h.losses}${h.ties ? `–${h.ties}` : ''} across ${h.matches} matches`, percentile: null })
+  }
+  if (h.avgScore != null && h.avgScore >= 120) {
+    out.push({ id: 'scoring', label: 'puts points on the board', detail: `${round(h.avgScore, 0)} pts per match`, percentile: null })
+  }
+  if (h.ceiling != null && h.ceiling >= 180) {
+    out.push({ id: 'ceiling', label: 'explosive ceiling', detail: `${round(h.ceiling, 0)} pts at the 90th percentile`, percentile: null })
+  }
+  if (h.floor != null && h.floor >= 110) {
+    out.push({ id: 'floor', label: 'reliable floor', detail: `rarely drops below ${round(h.floor, 0)} pts`, percentile: null })
+  }
+  if (h.cv != null && h.cv <= 0.22) {
+    out.push({ id: 'consistency', label: 'consistent scorer', detail: `spread is only ${Math.round(h.cv * 100)}% of its average`, percentile: null })
+  }
+  const form = (h.form || []).filter((g) => g.won != null)
+  if (form.length >= 4 && form.slice(0, 4).filter((g) => g.won).length >= 3) {
+    out.push({ id: 'form', label: 'in form right now', detail: `${form.slice(0, 4).filter((g) => g.won).length} wins in the last four`, percentile: null })
+  }
+  return out
+}
+
+function planSteps(attack) {
+  if (!attack?.top?.length) return []
+  const top = attack.top
+  const hasTag = (v, re) => (v.tags || []).some((t) => re.test(t))
+  const auton = top.find((v) => hasTag(v, /auton|early/i))
+  const end = top.find((v) => hasTag(v, /endgame|climb|park|late/i))
+  const main = top.find((v) => v !== auton && v !== end)
+  const steps = []
+  if (auton) steps.push({ phase: 'autonomous', text: `${auton.title} — ${auton.action}`, points: auton.expectedPoints })
+  if (main) steps.push({ phase: 'driver', text: `${main.title} — ${main.action}`, points: main.expectedPoints })
+  if (end) steps.push({ phase: 'endgame', text: `${end.title} — ${end.action}`, points: end.expectedPoints })
+  for (const v of top) {
+    if ([auton, main, end].includes(v)) continue
+    steps.push({ phase: 'if it stalls', text: `${v.title} — ${v.action}`, points: v.expectedPoints })
+  }
+  return steps
+}
+
+function simAgainst({ oppMu, ownMu, oppSd, ownSd, partnerSd = 12, basis }) {
+  if (oppMu == null || ownMu == null) return null
+  // A is the opponent, B is your alliance, so pB is your win probability.
+  const sim = simulateMatchup({
+    muA: oppMu + 0,
+    muB: ownMu + 0,
+    sigmaA: Math.sqrt((oppSd ?? partnerSd) ** 2 + partnerSd ** 2),
+    sigmaB: Math.sqrt((ownSd ?? partnerSd) ** 2 + partnerSd ** 2),
+    n: 4000
+  })
+  return {
+    basis,
+    oppWinProb: sim.pA,
+    ownWinProb: sim.pB,
+    tieRate: sim.tieRate,
+    mostLikely: { opp: sim.mostLikely.a, own: sim.mostLikely.b },
+    bands: { opp: sim.scoreA, own: sim.scoreB },
+    margin: sim.margin,
+    samples: sim.samples
+  }
+}
+
+function h2hRows(a, team, other) {
+  if (!other) return null
+  const rows = a.ratings.matches.filter((m) => {
+    const al = teamsOf(m)
+    return (al.red.includes(team) && al.blue.includes(other)) || (al.blue.includes(team) && al.red.includes(other))
+  })
+  const played = rows.filter(isScored)
+  const wins = played.filter((m) => {
+    const al = teamsOf(m)
+    const teamRed = al.red.includes(team)
+    return teamRed ? m.red_score > m.blue_score : m.blue_score > m.red_score
+  }).length
+  return {
+    team,
+    other,
+    played: played.length,
+    wins,
+    losses: played.length - wins,
+    matches: rows.map((m) => {
+      const al = teamsOf(m)
+      const teamRed = al.red.includes(team)
+      return {
+        key: m.match_key,
+        roundLabel: roundLabel(m.round),
+        matchnum: m.matchnum,
+        teamScore: teamRed ? m.red_score : m.blue_score,
+        otherScore: teamRed ? m.blue_score : m.red_score,
+        won: isScored(m) ? (teamRed ? m.red_score > m.blue_score : m.blue_score > m.red_score) : null
+      }
+    })
+  }
+}
+
+/** One opponent, from this event's completed matches. */
+function eventOpponent(a, team, own) {
   const t = a.ratings.teams.get(team)
-  if (!t) return null
+  const field = a.ratings.list.filter((x) => x.matches > 0)
   const style = a.archetypes.teams.get(team) || null
+  const metrics = metricsFor(t, style)
+  const baseline = fieldBaseline(a.ratings.list)
   const attack = attackVectors({ opponentNumber: team, ownNumber: own, ratings: a.ratings, archetypes: a.archetypes })
-  if (!attack) return null
+  const weaknesses = topWeaknesses(eventWeaknesses(t, { vectors: attack?.top || [], baseline }), 6)
+
   const played = a.ratings.matches.filter((m) => {
     const al = teamsOf(m)
     return al.red.includes(team) || al.blue.includes(team)
   })
-  return {
-    team: t,
-    style,
-    tendencies: style?.tendencies || null,
-    metrics: metricsFor(t, style),
-    attack,
-    briefing: teamBriefing({ team, ratings: a.ratings, styleEntry: style }),
-    matches: played.slice(-10).map((m) => {
+  const results = played
+    .map((m) => {
       const al = teamsOf(m)
-      const ownSide = al.red.includes(team) ? 'red' : 'blue'
-      const other = ownSide === 'red' ? 'blue' : 'red'
+      const side = al.red.includes(team) ? 'red' : 'blue'
+      const other = side === 'red' ? 'blue' : 'red'
+      const ownScore = side === 'red' ? m.red_score : m.blue_score
+      const oppScore = side === 'red' ? m.blue_score : m.red_score
       return {
         key: m.match_key,
         round: m.round,
         roundLabel: roundLabel(m.round),
         matchnum: m.matchnum,
-        side: ownSide,
-        own: al[ownSide],
-        opp: al[other],
-        ownScore: ownSide === 'red' ? m.red_score : m.blue_score,
-        oppScore: ownSide === 'red' ? m.blue_score : m.red_score
+        side,
+        alliance: al[side],
+        opponents: al[other],
+        ownScore,
+        oppScore,
+        won: ownScore != null && oppScore != null ? ownScore > oppScore : null,
+        scheduled: m.scheduled
       }
     })
+    .sort((x, y) => (Date.parse(y.scheduled || 0) || 0) - (Date.parse(x.scheduled || 0) || 0))
+
+  const ownTeam = own ? a.ratings.teams.get(own) : null
+  const ownStyle = own ? a.archetypes.teams.get(own) : null
+  const ownMetrics = ownTeam ? metricsFor(ownTeam, ownStyle) : null
+  const partner = field.length ? quantile(field.map((x) => x.mu), 0.5) : a.ratings.eventMean
+  const sim = ownTeam
+    ? simAgainst({
+        oppMu: t.mu + 2 * partner,
+        ownMu: ownTeam.mu + 2 * partner,
+        oppSd: t.sdPoints,
+        ownSd: ownTeam.sdPoints,
+        basis: 'event'
+      })
+    : null
+
+  return {
+    mode: 'event',
+    event: a.event,
+    team: { ...t, record: { wins: t.wins, losses: t.losses, ties: t.ties } },
+    style,
+    tendencies: style?.tendencies || null,
+    metrics,
+    ownMetrics,
+    percentiles: {
+      avgPoints: percentileOf(t, field, 'avgPoints'),
+      floor: percentileOf(t, field, 'floor'),
+      ceiling: percentileOf(t, field, 'ceiling'),
+      autonPerMatch: percentileOf(t, field, 'autonPerMatch'),
+      penaltyPerMatch: percentileOf(t, field, 'penaltyPerMatch', 'asc'),
+      cv: percentileOf(t, field, 'cv', 'asc'),
+      elo: percentileOf(t, field, 'elo')
+    },
+    strengths: ratingStrengths(t, field),
+    weaknesses,
+    attack,
+    plan: attack
+      ? {
+          winProb: attack.winProb,
+          winProbWithPlan: attack.winProbWithPlan,
+          deltaP: attack.deltaP,
+          swingPoints: attack.swingPoints,
+          steps: planSteps(attack),
+          roles: attack.roles,
+          triggers: attack.triggers
+        }
+      : null,
+    sim,
+    h2h: h2hRows(a, team, own),
+    briefing: teamBriefing({ team, ratings: a.ratings, styleEntry: style }),
+    results: results.slice(0, 12),
+    matches: results.slice(0, 10).map((r) => ({
+      key: r.key,
+      roundLabel: r.roundLabel,
+      matchnum: r.matchnum,
+      own: r.alliance,
+      opp: r.opponents,
+      ownScore: r.ownScore,
+      oppScore: r.oppScore
+    })),
+    notes: []
   }
 }
+
+/** One opponent, from its season before this event. */
+async function conceptualOpponent(a, team, own, { token }) {
+  const row = db.get('SELECT * FROM teams WHERE sku = ? AND number = ?', a.event.sku, team)
+  const history = await teamHistory(team, { token }).catch(() => null)
+  const name = history?.teamName || row?.name || null
+  const base = {
+    mode: 'conceptual',
+    event: a.event,
+    team: {
+      team,
+      name,
+      avgPoints: history?.avgScore ?? null,
+      floor: history?.floor ?? null,
+      ceiling: history?.ceiling ?? null,
+      cv: history?.cv ?? null,
+      winRate: history?.winRate ?? null,
+      elo: null,
+      rank: null,
+      clutch: null,
+      matches: history?.matches ?? 0,
+      wins: history?.wins ?? 0,
+      losses: history?.losses ?? 0,
+      ties: history?.ties ?? 0,
+      record: { wins: history?.wins ?? 0, losses: history?.losses ?? 0, ties: history?.ties ?? 0 }
+    },
+    season: history || null,
+    matches: [],
+    results: [],
+    h2h: null
+  }
+
+  if (!history || !history.matches) {
+    return {
+      ...base,
+      noHistory: true,
+      notes: [
+        `${team} has no matches at ${a.event.name} yet and no readable ${a.event.season || 'current-season'} results, so there is no counter sheet to build.`,
+        'Paste a RobotEvents key in the sidebar and its previous tournaments become available.'
+      ]
+    }
+  }
+
+  const metrics = historyMetrics(history)
+  // Your own side: this event if it has played here, otherwise its own season.
+  // Both sides must land on alliance-score units: an event rating is a per-team share, a
+  // season profile already is an alliance average.
+  const partnerShare = medianOf(a.ratings.list.filter((x) => x.matches > 0).map((x) => x.mu)) ?? 0
+  let ownMetrics = null
+  let ownMu = null
+  let ownSd = null
+  let ownSource = null
+  if (own) {
+    const r = a.ratings.teams.get(own)
+    if (r && r.matches > 0) {
+      ownMetrics = metricsFor(r, a.archetypes.teams.get(own))
+      ownMu = r.mu + 2 * partnerShare
+      ownSd = Math.sqrt((r.sdPoints ?? 12) ** 2 + 2 * 12 ** 2)
+      ownSource = 'event'
+    } else {
+      const oh = await teamHistory(own, { token }).catch(() => null)
+      if (oh && oh.matches) {
+        ownMetrics = historyMetrics(oh)
+        ownMu = oh.avgScore ?? 0
+        ownSd = oh.sd ?? 18
+        ownSource = 'season'
+      }
+    }
+  }
+
+  const vectors = vectorsFromMetrics(metrics, ownMetrics)
+  // Two season distributions are wider than one event's residual spread, so with no results
+  // here the spread has to come from the two teams themselves — 18 would call a 66-point gap
+  // a certainty.
+  const sigma = a.ratings.matches.some(isScored)
+    ? a.ratings.sigmaMargin
+    : Math.sqrt((history.sd ?? 30) ** 2 + (ownSd ?? 30) ** 2)
+  const muOpp = history.avgScore ?? 0
+  const attack = planFromVectors({
+    vectors,
+    oppMetrics: metrics,
+    muOpp,
+    muOwn: ownMu ?? muOpp,
+    sigmaMargin: sigma,
+    archetype: null
+  })
+
+  const sim =
+    ownMu != null
+      ? simAgainst({
+          oppMu: muOpp,
+          ownMu,
+          oppSd: history.sd ?? 18,
+          ownSd: ownSd ?? 18,
+          basis: 'season'
+        })
+      : null
+
+  return {
+    ...base,
+    metrics,
+    ownMetrics,
+    percentiles: null,
+    strengths: seasonStrengths(history),
+    weaknesses: topWeaknesses(historyWeaknesses(history, {}), 6),
+    attack,
+    plan: {
+      winProb: ownMu != null ? attack.winProb : null,
+      winProbWithPlan: ownMu != null ? attack.winProbWithPlan : null,
+      deltaP: ownMu != null ? attack.deltaP : null,
+      swingPoints: attack.swingPoints,
+      steps: planSteps(attack),
+      roles: attack.roles,
+      triggers: attack.triggers
+    },
+    sim,
+    ownSource,
+    results: (history.form || []).map((g, i) => ({
+      key: `season-${i}`,
+      roundLabel: 'Season',
+      matchnum: null,
+      alliance: [],
+      opponents: [],
+      ownScore: g.own,
+      oppScore: g.opp,
+      won: g.won,
+      eventName: g.eventName,
+      scheduled: g.date
+    })),
+    events: history.events || [],
+    notes: [
+      `${team} has no completed matches at ${a.event.name} yet — this sheet is built from its ${a.event.season || 'current'} season: ${history.wins}–${history.losses}${history.ties ? `–${history.ties}` : ''} over ${history.matches} matches.`,
+      'Rules that read autonomous, driver, penalty or clutch numbers cannot fire until the event scores matches; the coverage line below lists exactly what was missing.',
+      ownMu != null
+        ? `Win probability compares your ${ownSource === 'event' ? 'event' : 'season'} form with theirs, both with a median ally.`
+        : 'Pick your team above to get a win probability and a simulated score.'
+    ]
+  }
+}
+
+export async function opponentView(sku, team, own = null, { token = null } = {}) {
+  const a = analysis(sku)
+  if (!a) return null
+  const rating = a.ratings.teams.get(team)
+  const registered = db.getTeams(sku).some((r) => String(r.number || '').trim().toUpperCase() === team)
+  if (!rating && !registered) return null
+  const playedHere = Boolean(rating && rating.matches > 0 && a.ratings.matches.some(isScored))
+  return playedHere ? eventOpponent(a, team, own) : conceptualOpponent(a, team, own, { token })
+}
+
 
 const whenOf = (m) => {
   const v = Date.parse(m.scheduled || '')
@@ -763,10 +1151,12 @@ function eventSimulation(a, team) {
 
   const rows = field.map((o) => {
     const sim = simulateMatchup({
-      muA: t.mu + partnerMu,
-      muB: o.mu + partnerMu,
-      sigmaA: Math.sqrt((t.sdPoints ?? partnerSd) ** 2 + partnerSd ** 2),
-      sigmaB: Math.sqrt((o.sdPoints ?? partnerSd) ** 2 + partnerSd ** 2),
+      // Two median allies complete each alliance, so the projection is an alliance score
+      // rather than a slice of one.
+      muA: t.mu + 2 * partnerMu,
+      muB: o.mu + 2 * partnerMu,
+      sigmaA: Math.sqrt((t.sdPoints ?? partnerSd) ** 2 + 2 * partnerSd ** 2),
+      sigmaB: Math.sqrt((o.sdPoints ?? partnerSd) ** 2 + 2 * partnerSd ** 2),
       n: 2000
     })
     const av = attackVectors({ opponentNumber: o.team, ownNumber: team, ratings: a.ratings, archetypes: a.archetypes })
@@ -831,7 +1221,7 @@ function eventSimulation(a, team) {
     softSpots: aggregateWeaknesses(rows),
     distribution: histogram(rows.map((r) => r.p), 0.1),
     notes: [
-      `Every opponent was simulated 2,000 times with a median ally (${r1(partnerMu)} pts) added to both sides, so this is matchup strength rather than a predicted bracket.`,
+      `Every opponent was simulated 2,000 times with two median allies (${r1(partnerMu)} pts each) added to both sides, so this is matchup strength rather than a predicted bracket.`,
       `Win probabilities come from the same model as the onsite tab, with the field spread σ = ${sigma}.`,
       `Sample sizes differ per team: ${rows.length} opponents, from ${Math.min(...rows.map((r) => r.matches))} to ${Math.max(...rows.map((r) => r.matches))} matches each.`,
       'Weaknesses are read from this event only: low floor, wide spread, penalty leakage, thin autonomous, a losing record, plus whatever the counter rules fired on.'
@@ -885,14 +1275,18 @@ async function conceptualSimulation(a, team, rosterRows, { token }) {
   const history = await seasonHistories(needHistory, token)
   const ownEvent = fromEvent(team)
   const ownSeason = history.get(team) || null
-  const partnerSd = 12
   const sigma = a.ratings.sigmaMargin ?? 18
 
-  const share = (h) => (h?.avgScore != null ? h.avgScore / 3 : null)
-  const spread = (h) => Math.max(6, (h?.sd ?? 18) / 3)
+  // One scale for both sources: the score a team's alliance puts up. An event rating is a
+  // per-team share, so it is completed with two median allies; a season profile is already an
+  // alliance average. Without this, conceptual scores came out a third of the real thing.
+  const eventPartner = medianOf(a.ratings.list.filter((x) => x.matches > 0).map((x) => x.mu)) ?? 0
+  const allySd = 12
+  const eventAlliance = (ev) => (ev ? ev.mu + 2 * eventPartner : null)
+  const eventSd = (ev) => (ev ? Math.sqrt((ev.sdPoints ?? allySd) ** 2 + 2 * allySd ** 2) : null)
 
-  const ownMu = ownEvent?.mu ?? share(ownSeason)
-  const ownSd = ownEvent?.sdPoints ?? spread(ownSeason)
+  const ownMu = ownEvent ? eventAlliance(ownEvent) : ownSeason?.avgScore ?? null
+  const ownSd = ownEvent ? eventSd(ownEvent) : ownSeason?.sd ?? 18
 
   if (ownMu == null) {
     return {
@@ -919,11 +1313,17 @@ async function conceptualSimulation(a, team, rosterRows, { token }) {
       const ev = fromEvent(n)
       const h = history.get(n) || null
       if (!ev && !h) return null
-      return { n, ev, h, mu: ev ? ev.mu : share(h), sd: ev ? (ev.sdPoints ?? partnerSd) : spread(h) }
+      return {
+        n,
+        ev,
+        h,
+        mu: ev ? eventAlliance(ev) : h.avgScore ?? null,
+        sd: ev ? eventSd(ev) : h.sd ?? 18
+      }
     })
     .filter((s) => s && s.mu != null)
 
-  const partnerMu = medianOf(fieldStats.map((s) => s.mu)) ?? ownMu
+  const allyShare = eventPartner
   const eventBaseline = fieldBaseline(a.ratings.list)
   const historyBaseline = fieldBaseline(
     fieldStats.map((s) => ({
@@ -942,13 +1342,7 @@ async function conceptualSimulation(a, team, rosterRows, { token }) {
   }
 
   const rows = fieldStats.map(({ n, ev, h, mu, sd }) => {
-    const sim = simulateMatchup({
-      muA: ownMu + partnerMu,
-      muB: mu + partnerMu,
-      sigmaA: Math.sqrt(ownSd ** 2 + partnerSd ** 2),
-      sigmaB: Math.sqrt(sd ** 2 + partnerSd ** 2),
-      n: 2000
-    })
+    const sim = simulateMatchup({ muA: ownMu, muB: mu, sigmaA: ownSd, sigmaB: sd, n: 2000 })
     const all = ev ? eventWeaknesses(ev, { baseline: eventBaseline }) : historyWeaknesses(h, { baseline: seasonBase })
     const p = sim.pA
     const wins = ev?.wins ?? h?.wins ?? 0
@@ -1044,16 +1438,18 @@ async function conceptualSimulation(a, team, rosterRows, { token }) {
     },
     style: null,
     model: {
-      sigmaMargin: r1(sigma),
+      sigmaMargin: r1(
+        scoredHere ? a.ratings.sigmaMargin : Math.sqrt(2) * (medianOf(fieldStats.map((s) => s.sd)) ?? 18)
+      ),
       eventMean: r1(a.ratings.eventMean),
-      partnerMu: r1(partnerMu),
-      partnerSd,
+      partnerMu: r1(allyShare),
+      partnerSd: allySd,
       simulations: 2000,
       calibration: null,
       basis: 'season results'
     },
     counts,
-    edge: { ...edge, examplePartner: r1(partnerMu) },
+    edge: { ...edge, examplePartner: r1(allyShare) },
     watchlist: rows.filter((r) => r.tier === 'threat' || r.tier === 'tough').slice(0, 8),
     gifts: [...rows].filter((r) => r.tier === 'easy' || r.tier === 'favorable').sort((x, y) => y.p - x.p).slice(0, 8),
     opponents: rows,
@@ -1061,7 +1457,7 @@ async function conceptualSimulation(a, team, rosterRows, { token }) {
     distribution: histogram(rows.map((r) => r.p), 0.1),
     notes: [
       `${team} has no completed matches at ${a.event.name} yet, so nothing here is a result from this event — it is the field's season so far.`,
-      `Each team's expected points are its average alliance score divided by three, so the units match the event model and both sides carry the same median ally (${r1(partnerMu)} pts).`,
+      `Both sides are on alliance-score units: a season profile is the team's average alliance score, and a team that already played here adds two median allies (${r1(allyShare)} pts each) to its own share.`,
       `${withSeason} of ${rows.length} opponents are described by their previous tournaments (record, floor, ceiling, form); the rest already have results here.`,
       'Weaknesses come from that season: below-field scoring, a losing record, a wide spread, poor recent form, too thin a sample to trust.',
       'A key in the sidebar lets the server read seasons it has not cached yet; cached teams simulate without one.'

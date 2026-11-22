@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api, jpost, endpoints, useApi, fmt } from './api.js'
 import Overview from './views/Overview.jsx'
 import Matches from './views/Matches.jsx'
@@ -60,6 +60,13 @@ export default function App() {
     }
   })
   const [liveInfo, setLiveInfo] = useState(null)
+  // Re-reading the tournament: a running event gains matches every few minutes, so the page
+  // can pull a fresh copy instead of showing the snapshot it was opened with.
+  const [syncing, setSyncing] = useState(false)
+  const [syncedAt, setSyncedAt] = useState(null)
+  const [syncError, setSyncError] = useState(null)
+  const [dataKey, setDataKey] = useState(0)
+  const syncBusy = useRef(false)
   const known = ROUTES.some((r) => r.id === route.segs[0])
   const view = known ? route.segs[0] : events.length ? 'overview' : 'start'
   const sku = route.segs[1] || events[0]?.sku || null
@@ -86,6 +93,37 @@ export default function App() {
     if (id === 'counter') return currentTeam ? `${base}?own=${encodeURIComponent(currentTeam)}` : base
     return base
   }
+
+  const sync = async ({ silent = false } = {}) => {
+    if (!sku || syncBusy.current) return
+    syncBusy.current = true
+    setSyncing(true)
+    setSyncError(null)
+    try {
+      await jpost(endpoints.refresh(sku), { team: currentTeam || undefined })
+      setSyncedAt(new Date())
+      // Remount the views so every tab refetches instead of holding the old snapshot.
+      setDataKey((k) => k + 1)
+    } catch (e) {
+      if (!silent) setSyncError(e.message)
+    } finally {
+      syncBusy.current = false
+      setSyncing(false)
+    }
+  }
+
+  // While the event window includes today, re-read it every few minutes on its own.
+  useEffect(() => {
+    if (!sku || !event) return
+    const start = Date.parse(event.start_date || '')
+    const end = Date.parse(event.end_date || event.start_date || '')
+    const now = Date.now()
+    const live = !Number.isNaN(start) && now >= start - 86400000 && (Number.isNaN(end) || now <= end + 2 * 86400000)
+    if (!live) return
+    const id = setInterval(() => sync({ silent: true }), 4 * 60 * 1000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sku, event?.start_date, event?.end_date])
 
   // A resolved event is transient on the server; sync so a restart or a finished save never
   // leaves a stale banner behind.
@@ -240,6 +278,18 @@ export default function App() {
             </div>
           </div>
           <div className="topbar-actions">
+            {sku && (
+              <button
+                type="button"
+                className="theme-opt"
+                onClick={() => sync()}
+                disabled={syncing}
+                title={syncedAt ? `last synced ${syncedAt.toLocaleTimeString()}` : 'pull the latest matches from RobotEvents'}
+              >
+                <span>{syncing ? '⟳ syncing…' : '⟳ sync'}</span>
+              </button>
+            )}
+            {syncError && <span className="tiny bad">{syncError}</span>}
             <div className="theme-switch" role="group" aria-label="Colour theme">
               {THEMES.map((t) => (
                 <button
@@ -258,7 +308,7 @@ export default function App() {
             {event && <span className="top-pill">{event.transient ? 'unsaved session' : event.season || event.sku}</span>}
           </div>
         </header>
-        <main className="content">
+        <main className="content" key={dataKey}>
           {view === 'start' && <Start navigate={go} />}
           {!sku && view !== 'start' && <Empty>No events in the archive yet — start with a competition name and a team ID.</Empty>}
           {sku && view === 'onsite' && <Onsite sku={sku} team={param} navigate={go} />}

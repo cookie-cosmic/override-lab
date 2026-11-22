@@ -191,6 +191,66 @@ function safeJson(s) {
 }
 
 /**
+ * Re-ingest an archived event in place, keeping what the user added themselves: video links,
+ * their alignment offsets and the scouting notes. A tournament that is still running gets new
+ * matches every few minutes, and a plain re-resolve would drop all of that.
+ */
+export function refreshEventBundle(bundle) {
+  const sku = bundle.event?.sku
+  if (!sku) throw new Error('event bundle missing sku')
+  const before = get('SELECT transient FROM events WHERE sku = ?', sku)
+  const videos = all('SELECT * FROM videos WHERE sku = ?', sku)
+  const media = all(
+    'SELECT mm.* FROM match_media mm WHERE mm.match_key IN (SELECT match_key FROM matches WHERE sku = ?)',
+    sku
+  )
+  const scouting = all('SELECT * FROM scouting WHERE sku = ?', sku)
+  upsertEventBundle(bundle)
+  tx(() => {
+    for (const v of videos) {
+      run(
+        'INSERT INTO videos(id, sku, youtube_id, label, stream_start, duration_s, field, notes) VALUES(?,?,?,?,?,?,?,?)',
+        v.id,
+        v.sku,
+        v.youtube_id,
+        v.label,
+        v.stream_start,
+        v.duration_s,
+        v.field,
+        v.notes
+      )
+    }
+    for (const m of media) {
+      run(
+        `INSERT INTO match_media(match_key, video_id, offset_s, seek_s, confidence, source)
+         VALUES(?,?,?,?,?,?)
+         ON CONFLICT(match_key) DO UPDATE SET video_id=excluded.video_id, offset_s=excluded.offset_s,
+           seek_s=excluded.seek_s, confidence=excluded.confidence, source=excluded.source`,
+        m.match_key,
+        m.video_id,
+        m.offset_s,
+        m.seek_s,
+        m.confidence,
+        m.source
+      )
+    }
+    for (const s of scouting) {
+      run(
+        `INSERT INTO scouting(sku, team, data, updated_at) VALUES(?,?,?,?)
+         ON CONFLICT(sku, team) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`,
+        s.sku,
+        s.team,
+        s.data,
+        s.updated_at
+      )
+    }
+  })
+  // A refresh must not turn an unsaved session into a permanent archive entry.
+  if (before?.transient) setTransient(sku, true)
+  return { sku, videos: videos.length, aligned: media.length, scouting: scouting.length }
+}
+
+/**
  * Insert or replace a complete event bundle:
  * { event, teams, rankings, matches, skills, awards, videos }
  * Every field is coerced defensively — sources disagree on types (strings vs numbers).
