@@ -339,7 +339,8 @@ export function runMatchup(redId, blueId, scenario = DEFAULT_SCENARIO, trials = 
   const sortedRed = [...redScores].sort((a, b) => a - b)
   const sortedBlue = [...blueScores].sort((a, b) => a - b)
   const margins = redScores.map((r, i) => r - blueScores[i])
-  const top = Math.max(...redScores, ...blueScores)
+  // Avoid a spread over every score: 10k trials would push 20k arguments into Math.max.
+  const top = redScores.concat(blueScores).reduce((m, x) => (x > m ? x : m), 0)
 
   // 10-point histogram, one row per bin, for the distribution readout.
   const bins = []
