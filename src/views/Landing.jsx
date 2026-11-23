@@ -66,9 +66,8 @@ export default function Landing({ onTeam }) {
           </span>
         </a>
         <nav className="landing-nav" aria-label="Site">
-          <a href="#welcome-features">Features</a>
-          <a href="#welcome-data">Data</a>
-          <a href="#welcome-how">Personalisation</a>
+          <a href="#welcome-features">Tools</a>
+          <a href="#welcome-how">How it works</a>
           {hasTeams ? (
             <Btn size="sm" variant="primary" onClick={open}>
               Open dashboard
@@ -176,61 +175,6 @@ export default function Landing({ onTeam }) {
         </div>
       </section>
 
-      <section className="landing-section previews" id="welcome-data">
-        <div className="section-head">
-          <h2>Built around real Override data</h2>
-          <p>
-            Results come from the VEX Events API. Anything computed — ratings, compatibility, estimates — is labelled
-            with its method and sample size.
-          </p>
-        </div>
-        <div className="preview-grid">
-          <article className="preview">
-            <div className="preview-label">Example layout · not live data</div>
-            <h3>Tournament analytics</h3>
-            <div className="mini-kpis">
-              <span><strong>6–2–0</strong> qualification</span>
-              <span><strong>3rd</strong> ranking</span>
-              <span><strong>89.4</strong> avg alliance</span>
-              <span><strong>+7.1</strong> margin</span>
-            </div>
-            <div className="mini-table">
-              <div><span>QF 2–1</span><span className="dim">won</span></div>
-              <div><span>SF 1–2</span><span className="dim">lost</span></div>
-              <div><span>Skills 214</span><span className="dim">driver · auto</span></div>
-            </div>
-          </article>
-          <article className="preview">
-            <div className="preview-label">Example layout · not live data</div>
-            <h3>Alliance compatibility</h3>
-            <div className="mini-compat">
-              <span style={{ width: '78%' }} />
-            </div>
-            <p className="tiny dim">Autonomous overlap, AWP fit, scoring balance and role conflict, each shown separately.</p>
-            <div className="mini-tags">
-              <span className="chip">auto: complementary</span>
-              <span className="chip">AWP: both capable</span>
-              <span className="chip">role: scorer + toggle</span>
-            </div>
-          </article>
-          <article className="preview">
-            <div className="preview-label">Example layout · not live data</div>
-            <h3>Field simulator</h3>
-            <div className="mini-score">
-              <span className="red">red 74</span>
-              <span className="dim">·</span>
-              <span className="blue">blue 61</span>
-            </div>
-            <ul className="mini-list tiny">
-              <li>Alliance halves 55 · 45</li>
-              <li>Yellow halves 0 · 10</li>
-              <li>Midfield 16 · 8</li>
-              <li>Auto bonus 12 · 0</li>
-            </ul>
-          </article>
-        </div>
-      </section>
-
       <section className="landing-section" id="welcome-how">
         <div className="section-head">
           <h2>How personalisation works</h2>
@@ -257,11 +201,15 @@ export default function Landing({ onTeam }) {
           <h2>Start with your team number</h2>
           <p>One number, every tool. Add more teams later and switch between them at any time.</p>
         </div>
-        <TeamLookup
-          compact
-          cta="Continue →"
-          onConfirmed={onTeam}
-        />
+        {hasTeams ? (
+          <Btn variant="primary" onClick={open}>
+            Open dashboard
+          </Btn>
+        ) : (
+          <Btn variant="primary" onClick={() => document.querySelector('.hero .lookup-bar input')?.focus()}>
+            Enter a team number
+          </Btn>
+        )}
       </section>
 
       <footer className="landing-foot">

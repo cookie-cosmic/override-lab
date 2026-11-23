@@ -25,7 +25,6 @@ import Settings from './views/Settings.jsx'
 import { Empty, Btn } from './components/ui.jsx'
 import ApiKey from './components/ApiKey.jsx'
 import TeamSwitcher from './components/TeamSwitcher.jsx'
-import { THEMES, useTheme } from './theme.js'
 import { TeamProvider, useTeam } from './team/TeamContext.jsx'
 import { navigate, parseHash } from './router.js'
 
@@ -58,12 +57,51 @@ const ROUTES = [
 ]
 const NAV_GROUPS = ['My team', 'Tools', 'Review', 'Analysis', 'Data']
 const titleFor = (id) => ROUTES.find((r) => r.id === id)?.label || 'Override Lab'
+
+function NavSection({ label, ids, view, pathFor, go, collapsible = true, defaultOpen = false }) {
+  const activeInside = ids.includes(view)
+  const [open, setOpen] = useState(defaultOpen || activeInside)
+  useEffect(() => {
+    if (activeInside) setOpen(true)
+  }, [activeInside])
+  const links = ids.map((id) => ROUTES.find((r) => r.id === id)).filter(Boolean)
+  const expanded = collapsible ? open : true
+  return (
+    <div className={`nav-section ${expanded ? 'open' : ''}`}>
+      {collapsible ? (
+        <button type="button" className="nav-toggle" aria-expanded={expanded} onClick={() => setOpen((v) => !v)}>
+          <span className="nav-label">{label}</span>
+          <span className="nav-caret" aria-hidden="true">▾</span>
+        </button>
+      ) : (
+        <div className="nav-label">{label}</div>
+      )}
+      <div className="nav-collapse">
+        <div className="nav-items">
+          {links.map((r) => (
+            <a
+              key={r.id}
+              href={`#/${pathFor(r.id)}`}
+              className={view === r.id ? 'active' : ''}
+              onClick={(e) => {
+                e.preventDefault()
+                go(pathFor(r.id))
+              }}
+            >
+              <span className="ico" aria-hidden="true">{r.icon}</span>
+              {r.label}
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
 const MODEL_VIEWS = new Set(['overview', 'matches', 'stream', 'onsite', 'team', 'counter', 'meta', 'data', 'sim'])
 
 function Shell() {
   const { active, addTeam, hasTeams } = useTeam()
   const [route, setRoute] = useState(parseHash)
-  const [theme, setTheme] = useTheme()
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash())
@@ -89,22 +127,10 @@ function Shell() {
 
   const rawView = route.segs[0]
   const known = ROUTES.some((r) => r.id === rawView)
-  const welcome = rawView === 'welcome'
-  const view = welcome || !known ? (hasTeams ? 'dashboard' : 'welcome') : rawView
+  const welcome = !rawView || rawView === 'welcome'
+  const view = welcome ? 'welcome' : known ? rawView : hasTeams ? 'dashboard' : 'welcome'
   const sku = route.segs[1] || events[0]?.sku || null
   const param = route.segs[2] || null
-
-  // A first-time visitor lands on the public page, never on a hardcoded team.
-  if (welcome || (!hasTeams && view !== 'welcome')) {
-    return (
-      <Landing
-        onTeam={(record) => {
-          addTeam(record)
-          navigate('dashboard')
-        }}
-      />
-    )
-  }
 
   const event =
     events.find((e) => e.sku === sku) ||
@@ -205,6 +231,18 @@ function Shell() {
     navigate('start')
   }
 
+  // The public page is the front door, whether or not a team is already saved.
+  if (welcome || !hasTeams) {
+    return (
+      <Landing
+        onTeam={(record) => {
+          addTeam(record)
+          navigate('dashboard')
+        }}
+      />
+    )
+  }
+
   const eventView = MODEL_VIEWS.has(view)
   const noEventNeeded = !eventView
 
@@ -222,11 +260,11 @@ function Shell() {
 
         <TeamSwitcher />
 
+        {events.length > 0 && (
         <div className="event-pick">
           <div className="nav-label">Archived event</div>
           {eventsLoading && <div className="dim small">loading…</div>}
-          {!eventsLoading && !events.length && <div className="small dim">Archive empty</div>}
-          {events.length > 0 && (
+          {(
             <select value={sku || ''} onChange={(e) => go(pathFor(view, e.target.value))}>
               {events.map((e) => (
                 <option key={e.sku} value={e.sku}>
@@ -257,27 +295,19 @@ function Shell() {
             </div>
           )}
         </div>
+        )}
 
         <nav className="nav" aria-label="Main">
-          {NAV_GROUPS.map((group) => (
-            <div className="nav-group" key={group}>
-              <div className="nav-label">{group}</div>
-              {ROUTES.filter((r) => r.group === group).map((r) => (
-                <a
-                  key={r.id}
-                  href={`#/${pathFor(r.id)}`}
-                  className={view === r.id ? 'active' : ''}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    go(pathFor(r.id))
-                  }}
-                >
-                  <span className="ico" aria-hidden="true">{r.icon}</span>
-                  {r.label}
-                </a>
-              ))}
-            </div>
-          ))}
+          <NavSection label="Workspace" ids={['dashboard', 'tournaments', 'field', 'testing']} view={view} pathFor={pathFor} go={go} collapsible={false} />
+          <NavSection label="Strategy tools" ids={['scouting', 'alliance', 'autonomous', 'rules']} view={view} pathFor={pathFor} go={go} defaultOpen />
+          <NavSection
+            label="Tournament review"
+            ids={['start', 'overview', 'matches', 'stream', 'onsite', 'sim', 'simulator', 'team', 'counter', 'meta', 'data']}
+            view={view}
+            pathFor={pathFor}
+            go={go}
+          />
+          <NavSection label="Account" ids={['teams', 'settings']} view={view} pathFor={pathFor} go={go} />
         </nav>
 
         <div className="spacer" />
@@ -325,21 +355,6 @@ function Shell() {
               </button>
             )}
             {syncError && <span className="tiny bad">{syncError}</span>}
-            <div className="theme-switch" role="group" aria-label="Colour theme">
-              {THEMES.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`theme-opt ${theme === t.id ? 'active' : ''}`}
-                  title={`${t.label} theme`}
-                  aria-pressed={theme === t.id}
-                  onClick={() => setTheme(t.id)}
-                >
-                  <span className={`swatch ${t.id}`} />
-                  <span className="theme-label">{t.label}</span>
-                </button>
-              ))}
-            </div>
             {active && <span className="top-pill">{active.number}</span>}
           </div>
         </header>
@@ -361,7 +376,7 @@ function Shell() {
           </button>
         </nav>
 
-        <main className="content" id="main-content" key={dataKey}>
+        <main className="content" id="main-content" key={`${view}-${dataKey}`}>
           {view === 'dashboard' && <Dashboard />}
           {view === 'teams' && <MyTeams query={route.q} />}
           {view === 'tournaments' && <Tournaments />}

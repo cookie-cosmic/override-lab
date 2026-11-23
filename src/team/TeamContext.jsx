@@ -143,6 +143,7 @@ export function TeamProvider({ children }) {
       teams: profile.teams,
       active,
       activeNumber: active?.number || null,
+      defaultTeam: profile.defaultTeam,
       prefs: profile.prefs,
       hasTeams: profile.teams.length > 0,
       addTeam,

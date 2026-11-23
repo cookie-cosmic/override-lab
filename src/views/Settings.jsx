@@ -5,6 +5,7 @@ import { useTheme, THEMES } from '../theme.js'
 import { Badge, Btn, Card, Note } from '../components/ui.jsx'
 import { navigate } from '../router.js'
 import ApiKey from '../components/ApiKey.jsx'
+import BackupCode from '../components/BackupCode.jsx'
 
 export default function Settings() {
   const { teams, active, defaultTeam, prefs, setPref, setDefaultTeam, reset } = useTeam()
@@ -88,6 +89,10 @@ export default function Settings() {
           <Btn size="sm" variant="ghost" onClick={() => navigate('teams')}>Manage teams</Btn>
           <Btn size="sm" variant="ghost" onClick={() => navigate('welcome')}>Open landing page</Btn>
         </div>
+      </Card>
+
+      <Card title="Local backup & restore" subtitle="one PIN-protected code for everything saved in this browser">
+        <BackupCode />
       </Card>
 
       <Card title="RobotEvents access" subtitle="server-side token, or a key you keep in this browser">

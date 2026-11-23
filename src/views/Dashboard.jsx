@@ -13,13 +13,10 @@ const d = (v) => {
 const place = (t) => [t.city, t.region, t.country].filter(Boolean).join(', ')
 
 const ACTIONS = [
-  ['tournaments', '⌖', 'Analyze a tournament', 'Open the active team’s season schedule'],
-  ['scouting', '◎', 'Scout opponents', 'Record what you see, per event'],
-  ['alliance', '⇄', 'Compare alliances', 'Compatibility and 2v2 estimates'],
-  ['field', '▩', 'Open field simulator', 'Score an Override field end state'],
-  ['autonomous', '⟜', 'Plan autonomous', 'Waypoints, actions and the 15s clock'],
-  ['testing', '◍', 'Log a robot test', 'Trials, cycle time and reliability'],
-  ['rules', '¶', 'Search rules', 'Scoring definitions and official sources']
+  ['tournaments', '⌖', 'Tournaments', 'Season schedule and results'],
+  ['field', '▩', 'Field simulator', 'Score an Override end state'],
+  ['testing', '◍', 'Robot testing', 'Log trials and compare builds'],
+  ['alliance', '⇄', 'Alliance analysis', 'Compatibility and 2v2 estimates']
 ]
 
 function activity(team) {
@@ -127,7 +124,7 @@ export default function Dashboard() {
           </div>
           <div>
             <span className="tiny dim">Latest official activity</span>
-            <div>{latest ? `${latest.name} · ${d(latest.start)}` : 'none recorded'}</div>
+            <div>{latest ? `${latest.name}${latest.start ? ` · ${d(latest.start)}` : ''}` : 'none recorded'}</div>
           </div>
           <div>
             <span className="tiny dim">Next registered event</span>
@@ -208,7 +205,7 @@ export default function Dashboard() {
               {[...(events.upcoming || []), ...(events.completed || [])].slice(0, 5).map((e) => (
                 <tr key={e.sku}>
                   <td>{e.name}</td>
-                  <td className="mono">{d(e.start)}</td>
+                  <td className="mono nowrap">{d(e.start)}</td>
                   <td><Badge tone={e.status === 'upcoming' ? 'warn' : ''}>{e.status}</Badge></td>
                 </tr>
               ))}
@@ -237,28 +234,6 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <Card title="Recommended next step" subtitle="based on what exists for this team">
-        <div className="next-steps">
-          {!profile?.matches ? (
-            <p>
-              No official matches yet — start where results are not required:{' '}
-              <button className="link" onClick={() => navigate('field')}>score a planned end state</button> or{' '}
-              <button className="link" onClick={() => navigate('autonomous')}>time an autonomous routine</button>.
-            </p>
-          ) : !recent.length ? (
-            <p>
-              You have results but no saved work for {active.number}.{' '}
-              <button className="link" onClick={() => navigate('alliance')}>Compare an alliance partner</button> to turn the
-              record into a plan.
-            </p>
-          ) : (
-            <p>
-              Keep the loop closed: <button className="link" onClick={() => navigate('testing')}>log this week’s trials</button> so
-              changes can be compared against the last configuration.
-            </p>
-          )}
-        </div>
-      </Card>
     </div>
   )
 }
