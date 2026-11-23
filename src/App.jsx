@@ -8,6 +8,7 @@ import MetaPage from './views/MetaPage.jsx'
 import DataPage from './views/DataPage.jsx'
 import Onsite from './views/Onsite.jsx'
 import Sim from './views/Sim.jsx'
+import Simulator from './views/Simulator.jsx'
 import Stream from './views/Stream.jsx'
 import Start from './views/Start.jsx'
 import { Empty, Btn } from './components/ui.jsx'
@@ -21,6 +22,7 @@ const ROUTES = [
   { id: 'stream', label: 'Stream analysis', icon: '▶', group: 'Review' },
   { id: 'onsite', label: 'Onsite', icon: '⚡', group: 'Review' },
   { id: 'sim', label: 'Simulation', icon: '◈', group: 'Analysis' },
+  { id: 'simulator', label: 'Override sim', icon: '▩', group: 'Analysis' },
   { id: 'team', label: 'Team lab', icon: '◆', group: 'Analysis' },
   { id: 'counter', label: 'Opponent & counters', icon: '⚔', group: 'Analysis' },
   { id: 'meta', label: 'Meta & model', icon: '▦', group: 'Analysis' },
@@ -310,7 +312,10 @@ export default function App() {
         </header>
         <main className="content" key={dataKey}>
           {view === 'start' && <Start navigate={go} />}
-          {!sku && view !== 'start' && <Empty>No events in the archive yet — start with a competition name and a team ID.</Empty>}
+          {view === 'simulator' && <Simulator />}
+          {!sku && view !== 'start' && view !== 'simulator' && (
+            <Empty>No events in the archive yet — start with a competition name and a team ID.</Empty>
+          )}
           {sku && view === 'onsite' && <Onsite sku={sku} team={param} navigate={go} />}
           {sku && view === 'sim' && <Sim sku={sku} team={param} navigate={go} />}
           {sku && view === 'overview' && <Overview sku={sku} navigate={go} />}

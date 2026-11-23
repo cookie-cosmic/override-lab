@@ -8,3 +8,6 @@ data/vex.db-shm
 *.log
 /freebuff-sites-build/
 .firebase/
+
+# local reference checkouts
+.ref/
