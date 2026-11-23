@@ -10,6 +10,7 @@ export const THEMES = [
 ]
 
 const KEY = 'override-lab:theme'
+const DEFAULT = 'dark'
 const META = { light: '#f4f6fb', dark: '#0b0f16', glass: '#e7eeff' }
 
 export function getTheme() {
@@ -19,14 +20,14 @@ export function getTheme() {
   } catch {
     /* private mode: fall through to the default */
   }
-  return 'light'
+  return DEFAULT
 }
 
 export function applyTheme(id) {
-  const theme = THEMES.some((t) => t.id === id) ? id : 'light'
+  const theme = THEMES.some((t) => t.id === id) ? id : DEFAULT
   document.documentElement.dataset.theme = theme
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', META[theme] || META.light)
+  if (meta) meta.setAttribute('content', META[theme] || META[DEFAULT])
   return theme
 }
 
