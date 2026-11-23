@@ -53,6 +53,7 @@ const enc = encodeURIComponent
 
 export const endpoints = {
   events: () => '/api/events',
+  teamLookup: (number) => `/api/teams/lookup?number=${enc(number)}`,
   summary: (sku) => `/api/events/${enc(sku)}/summary`,
   matches: (sku) => `/api/events/${enc(sku)}/matches`,
   match: (sku, key) => `/api/events/${enc(sku)}/match?key=${enc(key)}`,

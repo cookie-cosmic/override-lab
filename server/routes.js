@@ -10,6 +10,10 @@ import { teamHistory } from './history.js'
 import { parseMatchCsv, parseTeamCsv } from './ingest/csv.js'
 import { sendJson, sendText, readBody, num } from './util.js'
 
+const TEAM_NUMBER = /^[0-9]{1,5}[A-Z]?$/;
+const normalizeTeam = (v) => String(v || '').trim().replace(/^#/, '').replace(/\s+/g, '').toUpperCase();
+const V5_PROGRAMS = new Set(['V5RC', 'VRC']);
+
 function youtubeId(input) {
   const s = String(input || '').trim()
   if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s
@@ -159,6 +163,99 @@ export async function handleApi(req, res, url) {
   try {
     if (parts[0] === 'health') {
       return sendJson(res, 200, { ok: true, events: db.listEvents().length, version: 1, wokeAt: new Date().toISOString() })
+    }
+
+    // Team onboarding. This resolves a team number to the official record(s) behind it and
+    // reports whether that team has played this season. It grants no access to anything: it is
+    // a public lookup, and private team work is never keyed by a typed-in number.
+    if (parts[0] === 'teams' && parts[1] === 'lookup' && method === 'GET') {
+      const number = normalizeTeam(q.get('number'))
+      const season = await currentSeason()
+      if (!number) return sendJson(res, 400, { error: 'team number required', number: null, season })
+      if (!TEAM_NUMBER.test(number)) {
+        return sendJson(res, 400, {
+          error: 'that is not a V5RC team number',
+          hint: 'Use the number on the robot, for example 75019D or 37S: up to five digits and an optional letter.',
+          number,
+          season
+        })
+      }
+      if (!authToken) {
+        return sendJson(res, 200, {
+          number,
+          season,
+          tokenRequired: true,
+          candidates: [],
+          notes: ['Official team details come from the RobotEvents API and need a token. You can still add the team number and use the strategy tools.']
+        })
+      }
+      let rows = []
+      try {
+        const json = await new RobotEvents(authToken).get('/teams', { 'number[]': [number], per_page: 50 })
+        rows = (json.data || []).filter((t) => normalizeTeam(t.number) === number)
+      } catch (e) {
+        return sendJson(res, 502, {
+          error: `RobotEvents could not be reached: ${e.message}`,
+          hint: 'Check the token, then retry. You can also add the team without official details.',
+          number,
+          season,
+          retryable: true
+        })
+      }
+      if (!rows.length) {
+        return sendJson(res, 404, {
+          error: `RobotEvents has no team ${number}`,
+          hint: 'Check the number and letter suffix. A team that has not registered for this season can still exist — that is different from an unknown number.',
+          number,
+          season
+        })
+      }
+      // Numbers are reused across programs and seasons; newest id first, with V5 records ahead
+      // of any other program that happens to share the number.
+      rows.sort((a, b) => Number(b.id) - Number(a.id))
+      rows.sort((a, b) => Number(V5_PROGRAMS.has(String(b.program?.code || '').toUpperCase())) - Number(V5_PROGRAMS.has(String(a.program?.code || '').toUpperCase())))
+      const candidates = rows.slice(0, 6).map((t) => ({
+        id: t.id ?? null,
+        number: normalizeTeam(t.number),
+        name: t.team_name || t.name || null,
+        org: t.organization || null,
+        city: t.location?.city || null,
+        region: t.location?.region || null,
+        country: t.location?.country || null,
+        grade: t.grade || null,
+        program: t.program?.name || null,
+        programCode: t.program?.code || null,
+        v5: V5_PROGRAMS.has(String(t.program?.code || '').toUpperCase())
+      }))
+      const primary = candidates[0]
+      let schedule = null
+      try {
+        const events = await new RobotEvents(authToken).eventsForTeam(primary.id ?? number, season.id)
+        const now = Date.now()
+        const inScope = events.filter((e) => !seasonMismatch(season, { seasonId: e.season?.id, seasonName: e.season?.name, start: e.start }))
+        const upcoming = inScope
+          .filter((e) => Date.parse(e.start || 0) > now)
+          .sort((a, b) => Date.parse(a.start || 0) - Date.parse(b.start || 0))
+        const completed = inScope
+          .filter((e) => Date.parse(e.start || 0) <= now)
+          .sort((a, b) => Date.parse(b.start || 0) - Date.parse(a.start || 0))
+        schedule = {
+          total: inScope.length,
+          upcoming: upcoming.slice(0, 3).map(eventCard),
+          completed: completed.slice(0, 3).map(eventCard),
+          next: upcoming[0] ? eventCard(upcoming[0]) : null,
+          latest: completed[0] ? eventCard(completed[0]) : null
+        }
+      } catch (e) {
+        schedule = { error: e.message, total: 0, upcoming: [], completed: [], next: null, latest: null }
+      }
+      return sendJson(res, 200, {
+        number,
+        season,
+        candidates: candidates.map((c, i) => (i === 0 ? { ...c, schedule } : c)),
+        seasonStatus: schedule?.total ? 'active' : 'none',
+        notes: schedule?.error ? [`the season schedule could not be read: ${schedule.error}`] : []
+      })
     }
 
     // Checks a key the user pasted, without revealing either key anywhere.
