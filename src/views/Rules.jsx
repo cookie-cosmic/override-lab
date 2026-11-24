@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useTeam } from '../team/TeamContext.jsx'
 import { useTeamStore } from '../team/TeamContext.jsx'
+import { useAccess } from '../access/AccessContext.jsx'
 import { Badge, Btn, Card, Empty, Note } from '../components/ui.jsx'
 import { navigate } from '../router.js'
 
@@ -151,6 +152,10 @@ export default function Rules() {
     }))
   }
 
+  // A public visitor has no simulator to open, so the page does not offer one.
+  const { isOwner, can } = useAccess()
+  const canOpenTool = (affects) => isOwner || can(affects === 'field' ? 'fieldSimulator' : 'simulation')
+
   const open = (id) => {
     setOpenId((cur) => (cur === id ? null : id))
     saveBookmarks((prev) => ({ ...prev, recent: [id, ...(prev.recent || []).filter((x) => x !== id)].slice(0, 5) }))
@@ -192,7 +197,7 @@ export default function Rules() {
                   <p>{r.summary}</p>
                   <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                     <a href={MANUAL} target="_blank" rel="noreferrer" className="tiny">Official manual ↗</a>
-                    {r.affects && (
+                    {r.affects && canOpenTool(r.affects) && (
                       <button className="link tiny" onClick={() => navigate(r.affects === 'field' ? 'field' : 'autonomous')}>
                         Used by the {r.affects === 'field' ? 'field simulator' : 'autonomous planner'} →
                       </button>

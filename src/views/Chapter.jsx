@@ -8,7 +8,7 @@ import { navigate } from '../router.js'
 import { AccessForm } from './AccessPanel.jsx'
 import UnlockDialog from './UnlockDialog.jsx'
 
-const AVAILABLE = ['approved', 'issued']
+const OPEN = ['approved', 'issued']
 const STATUS = {
   approved: { label: 'Available', tone: 'good' },
   issued: { label: 'Available', tone: 'good' },
@@ -19,6 +19,12 @@ const STATUS = {
 }
 
 const label = (status) => STATUS[status] || { label: status || 'Not issued', tone: '' }
+
+// A workspace is only ready once its access code has actually been issued. An approved team
+// with no code looks enabled in the database but nobody can open it, so it reads as not issued.
+const isAvailable = (team) => OPEN.includes(team.status) && Boolean(team.hasPin)
+const teamStatus = (team) =>
+  OPEN.includes(team.status) && !team.hasPin ? { label: 'Not issued', tone: '' } : label(team.status)
 const fmtDate = (v) => {
   if (!v) return '—'
   const d = new Date(v)
@@ -26,8 +32,8 @@ const fmtDate = (v) => {
 }
 
 function TeamCard({ team, open, onOpen, onRequest, requesting }) {
-  const status = label(team.status)
-  const available = AVAILABLE.includes(team.status)
+  const status = teamStatus(team)
+  const available = isAvailable(team)
   const record = team.record
   const bestSkill = (team.skills || [])[0]
   const event = team.upcoming || team.latestEvent
@@ -112,7 +118,7 @@ export default function Chapter({ query }) {
   const totals = useMemo(
     () => ({
       teams: teams.length,
-      ready: teams.filter((t) => AVAILABLE.includes(t.status)).length,
+      ready: teams.filter((t) => isAvailable(t)).length,
       pending: teams.filter((t) => t.status === 'pending').length,
       awards: teams.reduce((sum, t) => sum + (t.awards?.length || 0), 0)
     }),
@@ -227,7 +233,7 @@ export default function Chapter({ query }) {
           <div className="card-b flush">
             <Table head={['Team', 'Status', 'Code', 'Last used', '']}>
               {teams.map((team) => {
-                const status = label(team.status)
+                const status = teamStatus(team)
                 return (
                   <tr key={team.team}>
                     <td className="mono">{team.team}</td>
@@ -235,7 +241,7 @@ export default function Chapter({ query }) {
                     <td className="tiny dim">{team.hasPin ? 'Issued privately' : 'Not issued'}</td>
                     <td className="tiny dim">{team.lastSeenAt ? new Date(team.lastSeenAt).toLocaleString() : '—'}</td>
                     <td style={{ textAlign: 'right' }}>
-                      {AVAILABLE.includes(team.status) ? (
+                      {isAvailable(team) ? (
                         <Btn size="sm" variant="ghost" onClick={() => setUnlock(team)}>Open workspace</Btn>
                       ) : team.status === 'pending' ? (
                         <span className="tiny dim">awaiting owner</span>

@@ -183,11 +183,11 @@ export function PublicHome() {
           <h3>Competitions</h3>
           <p>Tournaments on the current season calendar, with dates and official results.</p>
         </a>
-        <a className="feature-card" href="#/teams">
+        <div className="feature-card is-static">
           <span className="fc-icon"><Icon name="zap" size={19} /></span>
           <h3>Robot Skills</h3>
-          <p>Driver and programming skills scores as published for each team this season.</p>
-        </a>
+          <p>Driver and programming skills runs count toward a team&apos;s official season record. Skills detail is not part of the public team page.</p>
+        </div>
       </section>
 
       <section className="chapter-band" id="chapter">
