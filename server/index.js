@@ -10,6 +10,8 @@ import { loadEnv } from './env.js'
 
 // Loads ROBOTEVENTS_TOKEN from a local .env when present. Values are never logged or served.
 const envNames = loadEnv()
+// Boolean only: never the value. Makes a missing owner code obvious in the server log.
+console.log(`[access] owner entry ${process.env.OWNER_ENTRY_CODE ? 'configured' : 'not configured'}; authenticator ${process.env.OWNER_TOTP_SECRET ? 'configured' : 'not configured'}`)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')

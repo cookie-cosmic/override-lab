@@ -445,10 +445,8 @@ export default function Scouting({ sku }) {
 
       <Card title="Scouting coverage and privacy">
         <p className="small dim">
-          Notes are personal to this browser and stored under the active team, {active.number}. Switching teams loads
-          that team&apos;s notes only. Collaborative scouting — multiple scouts sharing one event workspace with roles
-          and conflict handling — needs an authenticated workspace, which this guest build does not create: a team number
-          is never treated as proof of membership.
+          Notes stay in this browser under {active.number}; switching teams shows only that team&apos;s notes. Nothing is
+          shared between devices.
         </p>
       </Card>
     </div>

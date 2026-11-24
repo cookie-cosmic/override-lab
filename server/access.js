@@ -792,8 +792,8 @@ export async function ownerBegin({ code, ip = null }) {
     audit({ action: 'access.rate_limited', detail: { kind: 'owner' }, ip })
     throw Object.assign(new Error('too many attempts — wait a few minutes and try again'), { status: 429 })
   }
-  const expected = String(process.env.OWNER_ENTRY_CODE)
-  const given = String(code || '')
+  const expected = String(process.env.OWNER_ENTRY_CODE).trim()
+  const given = String(code || '').trim()
   // Constant-time comparison over equal-length buffers.
   const a = Buffer.from(sha256(given), 'hex')
   const b = Buffer.from(sha256(expected), 'hex')

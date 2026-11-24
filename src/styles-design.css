@@ -687,7 +687,15 @@ body { background: var(--main); }
   animation: ol-grid-drift 44s linear infinite;
 }
 .app.mode-public { background-color: var(--main); }
-.sidebar, .main { position: relative; z-index: 1; }
+/* Keep the ambient grid behind the content, but never override the phone drawer: below 961px the
+   sidebar is position:fixed and off-canvas, and a blanket position:relative here pushed it back
+   into the page flow, leaving a blank screen above the header. */
+@media (min-width: 961px) {
+  .sidebar, .main { position: relative; z-index: 1; }
+}
+@media (max-width: 960px) {
+  .main { position: relative; z-index: 1; }
+}
 @keyframes ol-grid-drift {
   to { background-position: 76px 76px, 76px 76px; }
 }
@@ -945,3 +953,99 @@ body { background: var(--main); }
   radial-gradient(820px 520px at 2% 0%, rgba(108, 92, 224, 0.08), transparent 72%);
 }
 :root[data-theme="light"] .app::before { opacity: 0.5; }
+
+/* ---- Next match: the one card that answers "what is next, and when" ---------------------- */
+.next-up {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 20px;
+  padding: 22px 24px;
+  margin: 0 0 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(115, 156, 255, 0.14), rgba(150, 134, 245, 0.06) 48%, transparent 80%),
+    var(--panel);
+}
+.next-up::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, #739cff, #9686f5);
+}
+.next-up.is-blue::before { background: linear-gradient(180deg, #739cff, #4c7bff); }
+.next-up.is-red::before { background: linear-gradient(180deg, #f0736b, #c8453e); }
+.next-up.is-next-event::before { background: linear-gradient(180deg, #7fd6b0, #4bb98a); }
+.next-up-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.next-up-title {
+  font-size: clamp(26px, 2.6vw, 38px);
+  line-height: 1.1;
+  margin: 8px 0 14px;
+  letter-spacing: -0.02em;
+}
+.next-up-time { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; }
+.next-up-labels { display: grid; gap: 3px; font-size: 12px; color: var(--dim); }
+.next-up-labels b { color: var(--text); font-weight: 600; margin-right: 7px; }
+.next-up-side {
+  border-left: 1px solid var(--line);
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+.alliance-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: ol-live 2.4s infinite;
+}
+@keyframes ol-live {
+  0% { box-shadow: 0 0 0 0 rgba(115, 156, 255, 0.45); }
+  70% { box-shadow: 0 0 0 7px rgba(115, 156, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(115, 156, 255, 0); }
+}
+
+.countdown { display: inline-flex; align-items: flex-start; gap: 8px; font-variant-numeric: tabular-nums; }
+.count-group { display: inline-flex; align-items: baseline; gap: 3px; }
+.count-digits {
+  display: inline-flex;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 600;
+  font-size: clamp(26px, 2.4vw, 34px);
+  line-height: 1;
+}
+.count-digit { display: inline-grid; place-items: center; overflow: hidden; height: 1.05em; width: 0.62em; }
+.count-digit > span { animation: ol-tick 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes ol-tick {
+  from { transform: translateY(-70%); opacity: 0.2; }
+  to { transform: none; opacity: 1; }
+}
+.count-unit { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+.count-sep { color: var(--dim); opacity: 0.5; font-size: 22px; line-height: 1; }
+.countdown.is-over { font-size: 20px; color: var(--accent); letter-spacing: -0.01em; }
+
+@media (max-width: 860px) {
+  .next-up { grid-template-columns: 1fr; padding: 18px; }
+  .next-up-side { border-left: 0; border-top: 1px solid var(--line); padding: 14px 0 0; }
+  .next-up-time { gap: 16px; }
+}
+[data-motion='reduced'] .live-dot,
+[data-motion='reduced'] .count-digit > span { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .count-digit > span { animation: none; }
+}

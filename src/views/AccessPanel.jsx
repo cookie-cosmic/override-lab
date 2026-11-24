@@ -53,12 +53,17 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
         onDone && onDone(out)
         return
       }
+      // Chapter codes are generated in upper case without symbols, so they are normalised. The
+      // owner entry code is chosen by the owner and may contain any characters, so it is passed
+      // exactly as typed — never upper-cased or stripped.
       try {
-        const out = await loginChapter(code)
+        const out = await loginChapter(normaliseCode(code))
         setCode('')
         onDone && onDone(out)
       } catch (err) {
-        if (err.status === 401 && (await tryOwner(code))) {
+        // A refused or throttled chapter code still gets one quiet owner attempt, so waiting out
+        // the chapter limiter never blocks the owner's own entry.
+        if ((err.status === 401 || err.status === 429) && (await tryOwner(code.trim()))) {
           setCode('')
           return
         }
@@ -160,9 +165,11 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
         <input
           id="ol-access-code"
           value={code}
-          onChange={(e) => setCode(normaliseCode(e.target.value))}
+          onChange={(e) => setCode(e.target.value)}
           placeholder="Enter your access code"
           autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
           spellCheck={false}
           inputMode="text"
           aria-label="Access code"
