@@ -65,6 +65,7 @@ function TeamCard({ team, onUnlock, chapterId }) {
 
       <div className="row wrap" style={{ gap: 6 }}>
         <Btn size="sm" variant="ghost" onClick={() => navigate(`public/${team.team}`)}>Public statistics</Btn>
+        <Btn size="sm" variant="ghost" onClick={() => navigate(`team-login?team=${team.team}`)}>Enter team code</Btn>
         {['approved', 'issued'].includes(team.status) ? (
           <Btn size="sm" variant="primary" onClick={() => onUnlock(team.team)}>Unlock workspace</Btn>
         ) : sent || team.status === 'pending' ? (
@@ -126,7 +127,12 @@ export default function Chapter() {
             {chapter?.expiresAt ? ` · access until ${new Date(chapter.expiresAt).toLocaleDateString()}` : ''}
           </p>
         </div>
-        <Badge tone={chapter?.status === 'active' ? 'good' : 'bad'}>{chapter?.status || 'active'}</Badge>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <Badge tone={chapter?.status === 'active' ? 'good' : 'bad'}>{chapter?.status || 'active'}</Badge>
+          <Btn size="sm" variant="ghost" onClick={() => navigate('chapter-admin')}>
+            {access.admin ? 'Administration' : 'Chapter admin'}
+          </Btn>
+        </div>
       </header>
 
       <div className="stat-grid">
@@ -137,8 +143,9 @@ export default function Chapter() {
       </div>
 
       <Note>
-        Chapter access shows official public results and each team&apos;s access status. It does not grant, and this
-        dashboard does not display, any team&apos;s strategies, scouting notes, predictions, schedules or PIN.
+        Chapter access shows official public results and each team&apos;s access status. Each team opens its own workspace
+        with its own code — a chapter code never unlocks one. This panel does not display any team&apos;s strategies,
+        scouting notes, predictions, schedules or code.
       </Note>
 
       <nav className="tabs" aria-label="Chapter sections">
@@ -172,7 +179,10 @@ export default function Chapter() {
                 <td className="tiny dim">{team.lastSeenAt ? new Date(team.lastSeenAt).toLocaleString() : '—'}</td>
                 <td>
                   {['approved', 'issued'].includes(team.status) ? (
-                    <Btn size="sm" variant="ghost" onClick={() => setUnlock(team.team)}>Unlock</Btn>
+                    <div className="row" style={{ gap: 4 }}>
+                      <Btn size="sm" variant="ghost" onClick={() => navigate(`team-login?team=${team.team}`)}>Team sign-in</Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => setUnlock(team.team)}>Unlock here</Btn>
+                    </div>
                   ) : team.status === 'pending' ? (
                     <span className="tiny dim">awaiting owner</span>
                   ) : (

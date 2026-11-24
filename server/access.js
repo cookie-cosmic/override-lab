@@ -146,6 +146,14 @@ function dbReady() {
   run('CREATE INDEX IF NOT EXISTS idx_attempt_key ON auth_attempts(key, at)')
   run('CREATE INDEX IF NOT EXISTS idx_sessions_team ON device_sessions(team_number)')
   run('CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_team ON chapter_teams(chapter_id, team_number)')
+
+  // Chapter administrators get their own password, separate from the shared chapter code, and
+  // the elevation lives on the device session so it can be revoked independently.
+  const chapterCols = all('PRAGMA table_info(chapters)').map((c) => c.name)
+  if (!chapterCols.includes('admin_hash')) run('ALTER TABLE chapters ADD COLUMN admin_hash TEXT')
+  if (!chapterCols.includes('admin_salt')) run('ALTER TABLE chapters ADD COLUMN admin_salt TEXT')
+  const sessionCols = all('PRAGMA table_info(device_sessions)').map((c) => c.name)
+  if (!sessionCols.includes('elevated')) run('ALTER TABLE device_sessions ADD COLUMN elevated INTEGER DEFAULT 0')
 }
 
 // ---- credentials ---------------------------------------------------------
@@ -265,6 +273,7 @@ const chapterView = (c) => ({
   status: c.status,
   expiresAt: c.expires_at,
   adminEnabled: Boolean(c.admin_enabled),
+  hasAdminPassword: Boolean(c.admin_hash),
   hasCode: Boolean(c.code_hash),
   codeHint: c.code_hint || null,
   createdAt: c.created_at,
@@ -474,6 +483,11 @@ export function issueTeamPin(numberIn) {
   return { pin, access: getTeamAccess(team) }
 }
 
+export const revokeChapterElevation = (chapterId) => {
+  run("UPDATE device_sessions SET elevated=0 WHERE chapter_id=? AND kind='chapter'", chapterId)
+  audit({ action: 'chapter.admin_password.revoked', chapterId })
+}
+
 export const revokeTeamSessions = (team) => {
   run('UPDATE device_sessions SET revoked_at=? WHERE team_number=? AND revoked_at IS NULL', nowIso(), teamNumber(team))
   audit({ action: 'team.sessions.revoked', team: teamNumber(team) })
@@ -570,7 +584,9 @@ export async function resolveAccess(req) {
       kind: 'chapter',
       chapter: row.chapter_id,
       chapterName: chapter.name,
-      admin: Boolean(chapter.admin_enabled),
+      // A chapter code opens the dashboard. Administrator controls need the separate chapter
+      // admin password, which elevates this device session.
+      admin: Boolean(chapter.admin_enabled && row.elevated),
       features: ['chapter'],
       team: null,
       owner: false,
@@ -665,11 +681,21 @@ export async function teamLogin({ team, pin, label = null, ip = null }) {
   }
 }
 
-export const ownerConfigured = () => Boolean(process.env.OWNER_ENTRY_CODE && process.env.OWNER_TOTP_SECRET)
+/** The entry code alone enables the admin entry field; TOTP adds the second factor. */
+export const ownerEntryConfigured = () => Boolean(process.env.OWNER_ENTRY_CODE)
+export const ownerMfaConfigured = () => Boolean(process.env.OWNER_TOTP_SECRET)
+export const ownerConfigured = ownerEntryConfigured
 
-/** Step one of owner sign-in: proves knowledge of the entry code. Grants nothing on its own. */
+/**
+ * Step one of owner sign-in: proves knowledge of the entry code.
+ *
+ * When an authenticator secret is configured the code only opens a challenge and a TOTP is
+ * still required. When it is not configured the session is issued directly and the response
+ * says so (`mfa: false`) so the UI can warn; setting OWNER_TOTP_SECRET restores the second
+ * factor without any code change.
+ */
 export async function ownerBegin({ code, ip = null }) {
-  if (!ownerConfigured()) {
+  if (!ownerEntryConfigured()) {
     throw Object.assign(new Error('owner access is not configured on this deployment'), { status: 503, code: 'owner_unconfigured' })
   }
   const key = `owner:${ip || 'unknown'}`
@@ -688,10 +714,59 @@ export async function ownerBegin({ code, ip = null }) {
     throw Object.assign(new Error('that access code was not recognised'), { status: 401 })
   }
   noteAttempt(key, true)
+
+  if (!ownerMfaConfigured()) {
+    const session = newSession({ kind: 'owner', label: 'owner console (no authenticator configured)' })
+    audit({ actorKind: 'owner', action: 'access.owner.login', detail: { mfa: false }, ip })
+    return {
+      token: session.token,
+      expiresAt: session.expiresAt,
+      kind: 'owner',
+      owner: true,
+      mfa: false,
+      warning: 'No authenticator is configured for this deployment, so the entry code alone opened the admin panel. Set OWNER_TOTP_SECRET to require a second factor.'
+    }
+  }
+
   const id = crypto.randomBytes(18).toString('base64url')
   run('INSERT INTO owner_entry(id, created_at, expires_at, ip_hash) VALUES(?,?,?,?)', id, nowIso(), addMinutes(nowIso(), ENTRY_TTL_MINUTES), ip ? sha256(ip).slice(0, 16) : null)
   audit({ action: 'access.owner.entry_ok', ip })
   return { challenge: id, expiresAt: addMinutes(nowIso(), ENTRY_TTL_MINUTES), method: 'totp' }
+}
+
+/** Issues a chapter administrator password. Returned once; stored only as a hash. */
+export function issueChapterAdminPassword(chapterId) {
+  const row = get('SELECT * FROM chapters WHERE id = ?', chapterId)
+  if (!row) throw Object.assign(new Error('unknown chapter'), { status: 404 })
+  const password = generateCode(3)
+  const { hash, salt } = hashSecret(password)
+  run('UPDATE chapters SET admin_hash=?, admin_salt=?, admin_enabled=1, updated_at=? WHERE id=?', hash, salt, nowIso(), chapterId)
+  // Anyone previously elevated has to sign in again with the new password.
+  run("UPDATE device_sessions SET elevated=0 WHERE chapter_id=? AND kind='chapter'", chapterId)
+  audit({ actorKind: 'owner', action: 'chapter.admin_password.issued', chapterId })
+  return { password, chapter: getChapter(chapterId) }
+}
+
+/** Elevates a chapter device session after the chapter admin password is entered. */
+export async function chapterAdminLogin(access, { password, ip = null }) {
+  if (access?.kind !== 'chapter' || !access.chapter) {
+    throw Object.assign(new Error('a chapter session is required'), { status: 401, code: 'chapter_required' })
+  }
+  const chapter = get('SELECT * FROM chapters WHERE id = ?', access.chapter)
+  if (!chapter) throw Object.assign(new Error('unknown chapter'), { status: 404 })
+  if (!chapter.admin_hash) throw Object.assign(new Error('no chapter administrator password has been issued for this chapter'), { status: 400 })
+
+  const key = `chapter-admin:${chapter.id}:${ip || 'unknown'}`
+  if (rateLimited(key, { max: 6 })) throw Object.assign(new Error('too many attempts — wait a few minutes and try again'), { status: 429 })
+  if (!matches(password, chapter.admin_hash, chapter.admin_salt)) {
+    noteAttempt(key, false)
+    audit({ action: 'access.chapter_admin.failed', chapterId: chapter.id, ip })
+    throw Object.assign(new Error('that password was not recognised'), { status: 401 })
+  }
+  noteAttempt(key, true)
+  run('UPDATE device_sessions SET elevated=1 WHERE id=?', access.sessionId)
+  audit({ actorKind: 'chapter', actorLabel: chapter.name, chapterId: chapter.id, action: 'access.chapter_admin.login', ip })
+  return { admin: true, chapter: getChapter(chapter.id) }
 }
 
 function base32Decode(input) {

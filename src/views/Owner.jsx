@@ -179,6 +179,11 @@ export default function Owner() {
     if (out) setReveal({ label: 'Chapter access code', value: out.code, notice: 'Give this to the chapter coordinator through a private channel.' })
   }
 
+  const issueAdminPassword = async (id) => {
+    const out = await run(() => jpost(`/api/access/chapters/${id}/admin-code`, {}), 'Could not issue administrator password')
+    if (out) setReveal({ label: 'Chapter administrator password', value: out.password, notice: 'Shown once. It elevates a chapter device; it is not a team code.' })
+  }
+
   const deleteChapter = async (id, name) => {
     if (!totp) {
       setError('Enter a current authenticator code in the field at the top of this page before deleting a chapter.')
@@ -273,6 +278,9 @@ export default function Owner() {
             <Card key={c.id} title={c.name} subtitle={`${c.teams.length} team${c.teams.length === 1 ? '' : 's'} · ${c.status}`} right={<Badge tone={c.hasCode ? 'good' : 'warn'}>{c.hasCode ? 'code issued' : 'no code'}</Badge>}>
               <div className="row wrap" style={{ gap: 8, marginBottom: 8 }}>
                 <Btn size="sm" onClick={() => issueCode(c.id)} disabled={busy}>{c.hasCode ? 'Rotate code' : 'Issue code'}</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => issueAdminPassword(c.id)} disabled={busy}>
+                  {c.hasAdminPassword ? 'Rotate admin password' : 'Issue admin password'}
+                </Btn>
                 <Btn size="sm" variant="ghost" onClick={() => deleteChapter(c.id, c.name)} disabled={busy}>Delete chapter</Btn>
                 <span className="tiny dim">
                   {c.expiresAt ? `expires ${new Date(c.expiresAt).toLocaleDateString()}` : 'expiry follows the season'}

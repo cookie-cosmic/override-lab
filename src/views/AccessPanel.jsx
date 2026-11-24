@@ -9,12 +9,12 @@ import Icon from '../components/Icons.jsx'
  * verification flow from the same field — the public UI never says so, and knowing a code is
  * never enough on its own.
  */
-export function AccessForm({ compact = false, onDone }) {
+export function AccessForm({ compact = false, onDone, initialMode = 'chapter', initialTeam = '' }) {
   const { loginChapter, loginTeam, ownerBegin, ownerVerify } = useAccess()
-  const [mode, setMode] = useState('chapter')
+  const [mode, setMode] = useState(initialMode)
   const [code, setCode] = useState('')
   const [pin, setPin] = useState('')
-  const [team, setTeam] = useState('')
+  const [team, setTeam] = useState(initialTeam)
   const [challenge, setChallenge] = useState(null)
   const [totp, setTotp] = useState('')
   const [busy, setBusy] = useState(false)
@@ -23,6 +23,26 @@ export function AccessForm({ compact = false, onDone }) {
   const reset = () => setError(null)
 
   const normaliseCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, '')
+
+  /** The owner entry code opens the admin panel from either field. */
+  const tryAdmin = async (value) => {
+    try {
+      const started = await ownerBegin(value)
+      if (started?.token) {
+        onDone && onDone(started.access || started)
+        return true
+      }
+      if (started?.challenge) {
+        setChallenge(started.challenge)
+        return true
+      }
+      return false
+    } catch {
+      // Not an admin code. The caller shows the ordinary sign-in error instead, so a mistyped
+      // chapter code never turns into a message about administrator configuration.
+      return false
+    }
+  }
 
   const submit = async (e) => {
     e.preventDefault()
@@ -36,22 +56,25 @@ export function AccessForm({ compact = false, onDone }) {
           onDone && onDone(out)
           return
         } catch (err) {
-          // The same field also accepts the privately configured owner entry code. A failed
-          // chapter lookup is retried once as an owner entry; nothing about the failure says
-          // which kind of code was expected.
-          if (err.status === 401) {
-            try {
-              const started = await ownerBegin(code)
-              setChallenge(started.challenge)
-              setCode('')
-              return
-            } catch (ownerErr) {
-              throw err
-            }
+          // A failed chapter lookup is retried once as an admin entry; nothing about the
+          // failure says which kind of code was expected.
+          if (err.status === 401 && (await tryAdmin(code))) {
+            setCode('')
+            return
           }
           throw err
         }
       }
+
+      // An admin code typed into the team field needs no PIN.
+      if (!pin) {
+        if (await tryAdmin(team)) {
+          setTeam('')
+          return
+        }
+        throw new Error('Enter the team number and its access code, or an administrator code.')
+      }
+
       const out = await loginTeam(team, pin)
       setPin('')
       onDone && onDone(out)
@@ -123,7 +146,7 @@ export function AccessForm({ compact = false, onDone }) {
       )}
 
       {mode === 'chapter' ? (
-        <Field label="Access code" hint="Chapter and workspace codes are issued by your coordinator. Codes are never stored in this browser.">
+        <Field label="Access code" hint="Chapter codes, and the administrator code, are accepted here. Codes are never stored in this browser.">
           <input
             value={code}
             onChange={(e) => setCode(normaliseCode(e.target.value))}
@@ -136,12 +159,13 @@ export function AccessForm({ compact = false, onDone }) {
         </Field>
       ) : (
         <>
-          <Field label="Team number">
+          <Field label="Team number" hint="An administrator code can be entered here instead.">
             <input
               value={team}
-              onChange={(e) => setTeam(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6))}
+              onChange={(e) => setTeam(e.target.value.toUpperCase().replace(/[^0-9A-Z-]/g, '').slice(0, 32))}
               placeholder="75019D"
               autoComplete="off"
+              spellCheck={false}
               aria-label="Team number"
             />
           </Field>
@@ -160,7 +184,7 @@ export function AccessForm({ compact = false, onDone }) {
 
       {error && <p className="small bad" role="alert">{error}</p>}
 
-      <Btn type="submit" variant="primary" disabled={busy || (mode === 'chapter' ? !code : !team || !pin)}>
+      <Btn type="submit" variant="primary" disabled={busy || (mode === 'chapter' ? !code : !team)}>
         {busy ? 'Checking…' : mode === 'chapter' ? 'Continue' : 'Unlock workspace'}
       </Btn>
     </form>

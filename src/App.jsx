@@ -11,6 +11,7 @@ import Settings from './views/Settings.jsx'
 import Chapter from './views/Chapter.jsx'
 import Owner, { OwnerViewTeam } from './views/Owner.jsx'
 import PublicTeam from './views/PublicTeam.jsx'
+import { ChapterLogin, TeamLogin, ChapterAdmin } from './views/AccessPages.jsx'
 import { Empty } from './components/ui.jsx'
 import Icon from './components/Icons.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
@@ -40,6 +41,9 @@ const TITLES = {
   rules: 'Rules & Q&A',
   settings: 'Settings',
   chapter: 'Chapter',
+  'chapter-login': 'Chapter sign-in',
+  'team-login': 'Team sign-in',
+  'chapter-admin': 'Chapter administration',
   owner: 'Owner Control Center',
   view: 'Workspace inspection',
   public: 'Public statistics',
@@ -186,7 +190,8 @@ function Shell() {
   const [evicted, setEvicted] = useState(false)
 
   const rawView = route.segs[0]
-  const view = rawView && TITLES[rawView] ? rawView : rawView ? rawView : 'welcome'
+  // The public home is the default screen, not a sign-in wall.
+  const view = rawView || 'home'
   const known = Boolean(TITLES[view]) || view === 'public'
   const eventParam = route.q.get('event')
   const eventName = route.q.get('name') || storedEvent.name
@@ -242,7 +247,9 @@ function Shell() {
     active?.number ||
     null
 
-  if (view === 'welcome' || (!hasTeams && !isTeam && !isChapter && !isOwner && !PUBLIC_VIEWS.has(view))) {
+  // The marketing page stays reachable at #/welcome, but it no longer gates the app: the home
+  // screen is public statistics with the access codes further down.
+  if (view === 'welcome') {
     return (
       <>
         <Landing
@@ -351,7 +358,10 @@ function Shell() {
         </header>
 
         <main className="content" id="main-content">
-          {view === 'home' && <Home />}
+          {view === 'home' && <Home query={route.q} />}
+          {view === 'chapter-login' && <ChapterLogin />}
+          {view === 'team-login' && <TeamLogin query={route.q} />}
+          {view === 'chapter-admin' && <ChapterAdmin />}
           {view === 'match-day' && <MatchDay query={route.q} sku={sku} activeTeam={currentTeam} go={go} eventName={eventName} />}
           {view === 'intelligence' && <Intelligence query={route.q} sku={sku} activeTeam={currentTeam} />}
           {view === 'simulation' && <Simulation query={route.q} sku={sku} />}

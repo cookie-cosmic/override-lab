@@ -7,6 +7,7 @@ import {
   PRESETS,
   audit,
   assignTeam,
+  chapterAdminLogin,
   chapterLogin,
   createChapter,
   decideRequest,
@@ -14,6 +15,7 @@ import {
   enableTeam,
   getChapter,
   getTeamAccess,
+  issueChapterAdminPassword,
   issueChapterCode,
   issueTeamPin,
   isOwner,
@@ -25,6 +27,7 @@ import {
   logout,
   ownerBegin,
   ownerConfigured,
+  ownerMfaConfigured,
   ownerVerify,
   removeTeam,
   requestAccess,
@@ -65,7 +68,10 @@ const clientIp = (req) =>
 
 /** Destructive owner actions need the authenticator again, not just the session. */
 function ownerReauth(req) {
-  if (!ownerConfigured()) return false
+  // With an authenticator configured, destructive actions need a fresh code. Without one the
+  // deployment has no second factor to ask for; the session itself is the only gate, which is
+  // why the UI warns when MFA is absent.
+  if (!ownerMfaConfigured()) return true
   return verifyTotp(process.env.OWNER_TOTP_SECRET, req.headers['x-ol-totp'])
 }
 
@@ -94,6 +100,7 @@ export const accessDescription = async (access) => ({
   features: access.features || [],
   reason: access.reason || null,
   ownerConfigured: ownerConfigured(),
+  ownerMfa: ownerMfaConfigured(),
   season: await seasonWindow(),
   catalog: FEATURES,
   presets: Object.fromEntries(Object.entries(PRESETS).map(([k, v]) => [k, v.label]))
@@ -127,7 +134,20 @@ export async function handleAccess(req, res, url, parts, q, method, access) {
   if (seg[0] === 'owner' && seg[1] === 'begin' && method === 'POST') {
     const b = await body(req)
     const out = await ownerBegin({ code: b.code, ip })
+    // When no authenticator is configured the entry code opens the session directly.
+    if (out.token) {
+      const asAccess = await resolveAccess({ headers: { 'x-ol-session': out.token } })
+      return sendJson(res, 200, { ...out, access: await accessDescription(asAccess) })
+    }
     return sendJson(res, 200, out)
+  }
+
+  // Chapter administrator elevation, from inside an existing chapter session.
+  if (seg[0] === 'chapter' && seg[1] === 'admin' && method === 'POST') {
+    const b = await body(req)
+    const out = await chapterAdminLogin(access, { password: b.password, ip })
+    const asAccess = await resolveAccess(req)
+    return sendJson(res, 200, { ...out, access: await accessDescription(asAccess) })
   }
 
   if (seg[0] === 'owner' && seg[1] === 'verify' && method === 'POST') {
@@ -199,6 +219,11 @@ export async function handleAccess(req, res, url, parts, q, method, access) {
       const out = deleteChapter(chapter.id)
       audit({ actorKind: 'owner', action: 'chapter.deleted', chapterId: chapter.id, detail: chapter.name })
       return sendJson(res, 200, out)
+    }
+    if (seg[2] === 'admin-code' && method === 'POST') {
+      requireOwner(access)
+      const out = issueChapterAdminPassword(chapter.id)
+      return sendJson(res, 200, { ...out, notice: 'Shown once. Give it only to the chapter administrator; it is stored as a hash.' })
     }
     if (seg[2] === 'code' && method === 'POST') {
       requireOwner(access)

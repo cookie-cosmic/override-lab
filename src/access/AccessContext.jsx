@@ -81,7 +81,26 @@ export function AccessProvider({ children }) {
     [adopt]
   )
 
-  const ownerBegin = useCallback(async (code) => api('/api/access/owner/begin', { method: 'POST', body: JSON.stringify({ code }) }), [])
+  const ownerBegin = useCallback(
+    async (code) => {
+      const out = await api('/api/access/owner/begin', { method: 'POST', body: JSON.stringify({ code }) })
+      // Without a configured authenticator the server answers with a session; with one it
+      // answers with a challenge that still needs a TOTP.
+      if (out?.token) await adopt(out)
+      return out
+    },
+    [adopt]
+  )
+
+  const loginChapterAdmin = useCallback(
+    async (password) => {
+      const out = await api('/api/access/chapter/admin', { method: 'POST', body: JSON.stringify({ password }) })
+      if (out?.access) setAccess(out.access)
+      else await refresh()
+      return out
+    },
+    [refresh]
+  )
 
   const ownerVerify = useCallback(
     async (challenge, code, label) => {
@@ -120,6 +139,7 @@ export function AccessProvider({ children }) {
       loginTeam,
       ownerBegin,
       ownerVerify,
+      loginChapterAdmin,
       logout,
       can,
       isOwner: Boolean(access.owner),
@@ -129,7 +149,7 @@ export function AccessProvider({ children }) {
       features: access.features || [],
       season: access.season
     }),
-    [access, loading, error, refresh, loginChapter, loginTeam, ownerBegin, ownerVerify, logout, can]
+    [access, loading, error, refresh, loginChapter, loginTeam, ownerBegin, ownerVerify, loginChapterAdmin, logout, can]
   )
 
   return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>
