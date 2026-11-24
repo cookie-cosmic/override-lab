@@ -11,8 +11,9 @@ import Settings from './views/Settings.jsx'
 import Chapter from './views/Chapter.jsx'
 import Owner, { OwnerViewTeam } from './views/Owner.jsx'
 import PublicTeam from './views/PublicTeam.jsx'
+import { PublicHeader, PublicFooter, PublicHome, PublicTeams, PublicCompetitions } from './views/PublicSite.jsx'
 import { ChapterLogin, TeamLogin, ChapterAdmin } from './views/AccessPages.jsx'
-import { Empty } from './components/ui.jsx'
+import { Btn, Empty } from './components/ui.jsx'
 import Icon from './components/Icons.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
 import TeamSwitcher from './components/TeamSwitcher.jsx'
@@ -82,6 +83,8 @@ const LEGACY = {
   testing: () => 'development',
   autonomous: () => 'development',
   data: () => 'settings?tab=data',
+  // Public destinations remain reachable from a signed-in session.
+  competitions: () => 'match-day',
   teams: () => 'settings?tab=access',
   settings: () => 'settings'
 }
@@ -143,7 +146,7 @@ function ThemeMenu() {
 
 function Shell() {
   const { active, addTeam, hasTeams, teams, switchTeam } = useTeam()
-  const { access, isOwner, isChapter, isTeam } = useAccess()
+  const { access, isOwner, isChapter, isTeam, leaveTeam } = useAccess()
   const [route, setRoute] = useState(parseHash)
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -228,6 +231,9 @@ function Shell() {
     navigate(path)
   }
 
+  // Which experience this device is in. Navigation, page chrome and available routes follow it.
+  const mode = isOwner ? 'owner' : isTeam ? 'team' : isChapter ? 'chapter' : 'public'
+
   const setSidebar = () => {
     setCollapsed((v) => {
       const next = !v
@@ -263,11 +269,68 @@ function Shell() {
     )
   }
 
-  const title = view === 'public' ? 'Public statistics' : TITLES[view] || 'Override Lab'
-  const showEventPicker = ['match-day', 'intelligence', 'simulation'].includes(view) && (events.length > 0 || sku)
+  // Public visitors get a marketing shell with no workspace sidebar. Private routes resolve to
+  // an explanation instead of rendering a locked copy of the app.
+  if (mode === 'public') {
+    const publicViews = ['home', 'teams', 'competitions', 'public', 'rules', 'chapter-login', 'team-login', 'chapter']
+    return (
+      <div className="app mode-public">
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <PublicHeader view={view}>
+          <ThemeMenu />
+        </PublicHeader>
+        <main className="content" id="main-content">
+          {view === 'home' && <PublicHome />}
+          {view === 'teams' && <PublicTeams query={route.q} />}
+          {view === 'competitions' && <PublicCompetitions />}
+          {view === 'public' && (
+            <div className="public-page" style={{ paddingTop: 36 }}>
+              <PublicTeam team={route.segs[1] || route.q.get('team')} />
+            </div>
+          )}
+          {view === 'rules' && (
+            <div className="public-page" style={{ paddingTop: 36 }}>
+              <Rules />
+            </div>
+          )}
+          {view === 'chapter-login' && (
+            <div className="public-page" style={{ paddingTop: 24 }}><ChapterLogin /></div>
+          )}
+          {view === 'team-login' && (
+            <div className="public-page" style={{ paddingTop: 24 }}><TeamLogin query={route.q} /></div>
+          )}
+          {view === 'chapter' && (
+            <div className="public-page" style={{ paddingTop: 36 }}>
+              <Chapter query={route.q} />
+            </div>
+          )}
+          {!publicViews.includes(view) && (
+            <div className="public-page" style={{ paddingTop: 48 }}>
+              <h1 style={{ fontSize: 'var(--fs-title)', margin: '0 0 8px' }}>Sign in to continue</h1>
+              <p className="muted" style={{ maxWidth: '52ch' }}>
+                This workspace is available to chapter and team members. Enter your chapter access code to begin.
+              </p>
+              <Btn variant="primary" onClick={() => go('home')}>Back to the homepage</Btn>
+            </div>
+          )}
+        </main>
+        <PublicFooter />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} events={events} />
+      </div>
+    )
+  }
+
+  const title =
+    mode === 'chapter'
+      ? access.chapterName || 'Chapter'
+      : view === 'public'
+        ? 'Public statistics'
+        : TITLES[view] || 'Override Lab'
+  const showEventPicker =
+    mode !== 'chapter' && ['match-day', 'intelligence', 'simulation'].includes(view) && (events.length > 0 || sku)
 
   return (
-    <div className={`app ${collapsed ? 'rail' : ''} ${drawer ? 'drawer-open' : ''}`}>
+    <div className={`app mode-${mode} ${collapsed ? 'rail' : ''} ${drawer ? 'drawer-open' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to content</a>
 
       {drawer && <button type="button" className="drawer-scrim" aria-label="Close navigation" onClick={() => setDrawer(false)} />}
@@ -286,20 +349,50 @@ function Shell() {
           </button>
         </div>
 
-        <TeamSwitcher className={collapsed ? 'is-collapsed' : ''} />
+        {mode !== 'chapter' && <TeamSwitcher className={collapsed ? 'is-collapsed' : ''} />}
 
         <nav className="nav" aria-label="Main navigation">
-          <div className="nav-group">
-            <div className="nav-label">Workspace</div>
-            {NAV.map((item) => (
-              <NavLink key={item.id} item={item} active={view === item.id} collapsed={collapsed} onClick={go} />
-            ))}
-          </div>
-          {(isChapter || isOwner) && (
+          {mode === 'chapter' ? (
+            <div className="nav-group">
+              <div className="nav-label">Chapter</div>
+              <NavLink
+                item={{ id: 'chapter', label: 'Teams', icon: 'users' }}
+                active={view === 'chapter' && route.q.get('tab') !== 'codes'}
+                collapsed={collapsed}
+                onClick={() => go('chapter')}
+              />
+              <NavLink
+                item={{ id: 'chapter?tab=codes', label: 'Access Codes', icon: 'clipboard' }}
+                active={view === 'chapter' && route.q.get('tab') === 'codes'}
+                collapsed={collapsed}
+                onClick={() => go('chapter?tab=codes')}
+              />
+            </div>
+          ) : (
+            <div className="nav-group">
+              <div className="nav-label">Workspace</div>
+              {NAV.map((item) => (
+                <NavLink key={item.id} item={item} active={view === item.id} collapsed={collapsed} onClick={go} />
+              ))}
+              {isTeam && access.viaChapter && (
+                <button
+                  type="button"
+                  className="nav-link"
+                  onClick={async () => {
+                    await leaveTeam()
+                    go('chapter')
+                  }}
+                >
+                  <span className="nav-ico"><Icon name="users" size={18} /></span>
+                  <span className="nav-text">Chapter</span>
+                </button>
+              )}
+            </div>
+          )}
+          {isOwner && (
             <div className="nav-group">
               <div className="nav-label">Access</div>
-              {isChapter && <NavLink item={{ id: 'chapter', label: access.chapterName || 'Chapter', icon: 'users' }} active={view === 'chapter'} collapsed={collapsed} onClick={go} />}
-              {isOwner && <NavLink item={{ id: 'owner', label: 'Owner', icon: 'settings' }} active={view === 'owner'} collapsed={collapsed} onClick={go} />}
+              <NavLink item={{ id: 'owner', label: 'Owner', icon: 'settings' }} active={view === 'owner'} collapsed={collapsed} onClick={go} />
             </div>
           )}
         </nav>
@@ -312,13 +405,6 @@ function Shell() {
 
       <div className="main">
         {isOwner && <div className="owner-bar"><Icon name="settings" size={14} /> Owner session — every workspace and administrative action is audited.</div>}
-        {isTeam && (
-          <div className="session-bar">
-            <span><Icon name="users" size={14} /> <strong className="mono">{access.team}</strong> workspace · {(access.features || []).length} features</span>
-            <button type="button" className="link tiny" onClick={() => go('settings?tab=access')}>Manage</button>
-          </div>
-        )}
-
         <header className="topbar">
           <button type="button" className="icon-btn mobile-only" onClick={() => setDrawer(true)} aria-label="Open navigation">
             <Icon name="menu" size={19} />
@@ -358,7 +444,7 @@ function Shell() {
         </header>
 
         <main className="content" id="main-content">
-          {view === 'home' && <Home query={route.q} />}
+          {view === 'home' && (isChapter && !isTeam ? <Chapter query={route.q} /> : <Home query={route.q} />)}
           {view === 'chapter-login' && <ChapterLogin />}
           {view === 'team-login' && <TeamLogin query={route.q} />}
           {view === 'chapter-admin' && <ChapterAdmin />}
@@ -368,7 +454,7 @@ function Shell() {
           {view === 'development' && <Testing />}
           {view === 'rules' && <Rules />}
           {view === 'settings' && <Settings query={route.q} />}
-          {view === 'chapter' && <Chapter />}
+          {view === 'chapter' && <Chapter query={route.q} />}
           {view === 'owner' && <Owner />}
           {view === 'view' && <OwnerViewTeam team={route.segs[1]} />}
           {view === 'public' && <PublicTeam team={route.segs[1] || route.q.get('team')} />}
@@ -379,7 +465,7 @@ function Shell() {
           )}
         </main>
 
-        <nav className="mobile-bar" aria-label="Primary mobile navigation">
+        {mode !== 'chapter' && (<nav className="mobile-bar" aria-label="Primary mobile navigation">
           {[
             { id: 'home', label: 'Home', icon: 'dashboard' },
             { id: 'match-day', label: 'Match day', icon: 'zap' },
@@ -395,7 +481,7 @@ function Shell() {
             <Icon name="menu" size={20} />
             <span>More</span>
           </button>
-        </nav>
+        </nav>)}
       </div>
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} events={events} />

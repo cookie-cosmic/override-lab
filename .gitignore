@@ -14,3 +14,6 @@ data/vex.db-shm
 
 # security test artifacts
 .tmp-security-test/
+
+# local visual QA captures
+qa/

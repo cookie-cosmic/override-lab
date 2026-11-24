@@ -95,9 +95,16 @@ export function Tabs({ tabs, active, onChange }) {
   )
 }
 
-export function Btn({ children, onClick, variant = '', size = '', type = 'button', disabled, title }) {
+export function Btn({ children, onClick, variant = '', size = '', type = 'button', disabled, title, className = '', block = false, ...rest }) {
   return (
-    <button className={`btn ${variant} ${size}`} onClick={onClick} type={type} disabled={disabled} title={title}>
+    <button
+      className={`btn ${variant} ${size} ${block ? 'block' : ''} ${className}`.trim()}
+      onClick={onClick}
+      type={type}
+      disabled={disabled}
+      title={title}
+      {...rest}
+    >
       {children}
     </button>
   )

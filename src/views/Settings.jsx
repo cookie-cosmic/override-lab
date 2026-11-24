@@ -40,8 +40,7 @@ function AccessTab() {
         </div>
         {isTeam && (
           <Note>
-            Your device holds a revocable session, not a PIN. The PIN itself was shown once to the platform owner and is
-            stored only as a hash.
+            This device holds a session you can end at any time. No access code is stored in this browser.
           </Note>
         )}
         {isChapter && (

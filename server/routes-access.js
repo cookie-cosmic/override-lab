@@ -1,5 +1,6 @@
 // HTTP routes for the access hierarchy and the private team workspace.
 import { all, get, run } from './db.js'
+import { cachedHistory } from './history.js'
 import { sendJson, readBody } from './util.js'
 import {
   FEATURES,
@@ -9,6 +10,8 @@ import {
   assignTeam,
   chapterAdminLogin,
   chapterLogin,
+  chapterTeamLeave,
+  chapterTeamLogin,
   createChapter,
   decideRequest,
   deleteChapter,
@@ -98,9 +101,10 @@ export const accessDescription = async (access) => ({
   chapterName: access.chapterName || null,
   admin: Boolean(access.admin),
   features: access.features || [],
+  // True when the team was opened from inside a chapter session, which keeps the chapter open.
+  viaChapter: Boolean(access.viaChapter),
   reason: access.reason || null,
-  ownerConfigured: ownerConfigured(),
-  ownerMfa: ownerMfaConfigured(),
+  // Whether an owner entry is configured is deliberately not disclosed to the client.
   season: await seasonWindow(),
   catalog: FEATURES,
   presets: Object.fromEntries(Object.entries(PRESETS).map(([k, v]) => [k, v.label]))
@@ -126,9 +130,25 @@ export async function handleAccess(req, res, url, parts, q, method, access) {
 
   if (seg[0] === 'team' && seg.length === 1 && method === 'POST') {
     const b = await body(req)
-    if (!b.team || !b.pin) return sendJson(res, 400, { error: 'team number and access PIN are required' })
-    const out = await teamLogin({ team: b.team, pin: b.pin, label: b.label || null, ip })
+    if (!b.team || !b.pin) return sendJson(res, 400, { error: 'team number and access code are required' })
+    const out = await teamLogin({ team: b.team, pin: b.pin, label: b.label || null, ip, access })
     return sendJson(res, 200, { ...out, access: await accessDescription(await resolveAccess({ headers: { 'x-ol-session': out.token } })) })
+  }
+
+  // Opening a team from inside an authorized chapter session. This is the normal path: the
+  // chapter stays open and the team is layered on top of it.
+  if (seg[0] === 'chapter' && seg[1] === 'team' && method === 'POST') {
+    const b = await body(req)
+    if (!b.team || !b.pin) return sendJson(res, 400, { error: 'choose a team and enter its access code' })
+    const out = await chapterTeamLogin(access, { team: b.team, pin: b.pin, ip })
+    const asAccess = await resolveAccess(req)
+    return sendJson(res, 200, { ...out, access: await accessDescription(asAccess) })
+  }
+
+  if (seg[0] === 'chapter' && seg[1] === 'back' && method === 'POST') {
+    const out = chapterTeamLeave(access)
+    const asAccess = await resolveAccess(req)
+    return sendJson(res, 200, { ...out, access: await accessDescription(asAccess) })
   }
 
   if (seg[0] === 'owner' && seg[1] === 'begin' && method === 'POST') {
@@ -195,7 +215,32 @@ export async function handleAccess(req, res, url, parts, q, method, access) {
     if (seg.length === 2 && method === 'GET') {
       const teams = chapter.teams.map((team) => {
         const row = getTeamAccess(team)
-        return row ? publicTeam(row) : { team, status: 'not_requested', hasPin: false, features: [] }
+        // Public record only: cached official results, published skills and awards. Private
+        // scouting, strategy and predictions are never part of a chapter response.
+        const history = cachedHistory(team)
+        const skills = all('SELECT type, score FROM skills WHERE team = ? ORDER BY score DESC LIMIT 4', team)
+        const awards = all('SELECT name FROM awards WHERE team = ? LIMIT 6', team)
+        const events = (history?.events || []).slice(0, 3)
+        const upcoming = events.find((e) => Date.parse(e.start || 0) > Date.now()) || null
+        return {
+          ...(row ? publicTeam(row) : { team, status: 'not_requested', hasPin: false, features: [] }),
+          name: null,
+          record: history
+            ? {
+                matches: history.matches,
+                wins: history.wins,
+                losses: history.losses,
+                ties: history.ties,
+                winRate: history.winRate,
+                avgScore: history.avgScore,
+                events: history.events?.length ?? 0
+              }
+            : null,
+          skills: skills.map((s) => ({ type: s.type === 1 ? 'driver' : 'programming', score: s.score })),
+          awards: awards.map((a) => a.name),
+          latestEvent: events[0] || null,
+          upcoming
+        }
       })
       const requests = isOwner(access) ? listRequests().filter((r) => r.chapterId === chapter.id) : listRequests().filter((r) => r.chapterId === chapter.id && r.status !== 'declined')
       return sendJson(res, 200, {

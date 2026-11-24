@@ -12,7 +12,6 @@ const EMPTY = {
   admin: false,
   features: [],
   reason: null,
-  ownerConfigured: false,
   season: null,
   catalog: {},
   presets: {}
@@ -56,8 +55,8 @@ export function AccessProvider({ children }) {
     refresh()
   }, [refresh])
 
-  const adopt = useCallback(async (payload) => {
-    if (payload?.token) setSession(payload.token)
+  const adopt = useCallback(async (payload, remember = true) => {
+    if (payload?.token) setSession(payload.token, remember)
     if (payload?.access) {
       setAccess(payload.access)
       return payload.access
@@ -73,13 +72,30 @@ export function AccessProvider({ children }) {
     [adopt]
   )
 
+  /**
+   * Opens a team. Inside a chapter session the team is layered onto that session, so the chapter
+   * stays authorized and the server can verify the team belongs to it. A standalone team login
+   * only exists for workspaces that have no chapter.
+   */
   const loginTeam = useCallback(
-    async (team, pin, label) => {
-      const out = await api('/api/access/team', { method: 'POST', body: JSON.stringify({ team, pin, label }) })
-      return adopt(out)
+    async (team, pin, label, opts = {}) => {
+      const viaChapter = access.kind === 'chapter' || (access.kind === 'team' && access.viaChapter)
+      const path = viaChapter && !opts.direct ? '/api/access/chapter/team' : '/api/access/team'
+      const out = await api(path, { method: 'POST', body: JSON.stringify({ team, pin, label }) })
+      return adopt(out, opts.remember !== false)
     },
-    [adopt]
+    [adopt, access.kind, access.viaChapter]
   )
+
+  /** Returns to the chapter dashboard without signing the chapter out. */
+  const leaveTeam = useCallback(async () => {
+    try {
+      await api('/api/access/chapter/back', { method: 'POST', body: JSON.stringify({}) })
+    } catch {
+      /* the refresh below reports the truth */
+    }
+    return await refresh()
+  }, [refresh])
 
   const ownerBegin = useCallback(
     async (code) => {
@@ -137,6 +153,7 @@ export function AccessProvider({ children }) {
       refresh,
       loginChapter,
       loginTeam,
+      leaveTeam,
       ownerBegin,
       ownerVerify,
       loginChapterAdmin,
@@ -149,7 +166,7 @@ export function AccessProvider({ children }) {
       features: access.features || [],
       season: access.season
     }),
-    [access, loading, error, refresh, loginChapter, loginTeam, ownerBegin, ownerVerify, loginChapterAdmin, logout, can]
+    [access, loading, error, refresh, loginChapter, loginTeam, leaveTeam, ownerBegin, ownerVerify, loginChapterAdmin, logout, can]
   )
 
   return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>

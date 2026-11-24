@@ -123,7 +123,9 @@ async function main() {
     assert.equal(res.body.kind, 'public')
     assert.equal(res.body.owner, false)
     assert.deepEqual(res.body.features, [])
-    assert.equal(res.body.ownerConfigured, true)
+    // The public descriptor must not advertise whether owner entry exists at all.
+    assert.equal('ownerConfigured' in res.body, false)
+    assert.equal('ownerMfa' in res.body, false)
   })
 
   await check('public visitor cannot call a strategic endpoint directly', async () => {
@@ -261,23 +263,52 @@ async function main() {
     assert.equal(res.status, 403)
   })
 
-  await check('team login rejects a wrong PIN', async () => {
-    const res = await publicClient.post('/api/access/team', { team: '75019D', pin: 'ZZZZ-ZZZZ-ZZZZ' })
-    assert.equal(res.status, 401)
-  })
+  // A second chapter device, so two different teams can be open at once for the isolation tests.
+  const second = await publicClient.post('/api/access/chapter', { code: chapterCode })
+  const chapter2 = client(second.body.token)
 
-  await check('team login rejects another team’s PIN', async () => {
-    const res = await publicClient.post('/api/access/team', { team: '75019D', pin: pinB })
-    assert.equal(res.status, 401)
-  })
-
-  await check('team login accepts its own PIN', async () => {
+  await check('a chapter team is refused from a device with no chapter session', async () => {
     const res = await publicClient.post('/api/access/team', { team: '75019D', pin: pinA })
+    assert.equal(res.status, 403)
+    assert.equal(res.body.code, 'chapter_required')
+  })
+
+  await check('opening a team rejects a wrong code', async () => {
+    const res = await chapter.post('/api/access/chapter/team', { team: '75019D', pin: 'ZZZZ-ZZZZ-ZZZZ' })
+    assert.equal(res.status, 401)
+  })
+
+  await check('opening a team rejects another team’s code', async () => {
+    const res = await chapter.post('/api/access/chapter/team', { team: '75019D', pin: pinB })
+    assert.equal(res.status, 401)
+  })
+
+  await check('a chapter cannot open a team from another chapter', async () => {
+    const other = await owner.post('/api/access/chapters', { name: 'Other Chapter' })
+    const otherCode = await owner.post(`/api/access/chapters/${other.body.chapter.id}/code`, {})
+    const foreign = await publicClient.post('/api/access/chapter', { code: otherCode.body.code })
+    const client2 = client(foreign.body.token)
+    const res = await client2.post('/api/access/chapter/team', { team: '75019D', pin: pinA })
+    assert.equal(res.status, 403)
+  })
+
+  await check('opening a team keeps the chapter session and grants its features', async () => {
+    const res = await chapter.post('/api/access/chapter/team', { team: '75019D', pin: pinA })
+    teamTokenA = chapterToken
     assert.equal(res.status, 200)
-    assert.equal(res.body.kind, 'team')
-    assert.equal(res.body.team, '75019D')
-    assert.ok(res.body.features.includes('counters'))
-    teamTokenA = res.body.token
+    assert.equal(res.body.access.kind, 'team')
+    assert.equal(res.body.access.team, '75019D')
+    assert.equal(res.body.access.viaChapter, true)
+    assert.equal(res.body.access.chapter, chapterId)
+    assert.ok(res.body.access.features.includes('counters'))
+  })
+
+  await check('the same chapter session can return to its dashboard', async () => {
+    const res = await chapter.post('/api/access/chapter/back', {})
+    assert.equal(res.status, 200)
+    assert.equal(res.body.access.kind, 'chapter')
+    const again = await chapter.post('/api/access/chapter/team', { team: '75019D', pin: pinA })
+    assert.equal(again.status, 200)
   })
 
   const teamA = client(teamTokenA)
@@ -290,8 +321,9 @@ async function main() {
   })
 
   await check('a team session cannot use a disabled feature', async () => {
-    const res = await publicClient.post('/api/access/team', { team: '1234A', pin: pinB })
-    teamTokenB = res.body.token
+    const opened = await chapter2.post('/api/access/chapter/team', { team: '1234A', pin: pinB })
+    assert.equal(opened.status, 200)
+    teamTokenB = second.body.token
     const teamB = client(teamTokenB)
     const blocked = await teamB.get('/api/events/VE-V5-26-00001/opponent?team=1234A')
     assert.equal(blocked.status, 403)
@@ -333,8 +365,10 @@ async function main() {
 
   await check('suspending a team blocks new logins', async () => {
     await owner.patch('/api/access/teams/1234A', { status: 'suspended' })
-    const res = await publicClient.post('/api/access/team', { team: '1234A', pin: pinB })
+    const res = await chapter2.post('/api/access/chapter/team', { team: '1234A', pin: pinB })
     assert.equal(res.status, 403)
+    const me = await chapter2.get('/api/access/me')
+    assert.equal(me.body.kind, 'chapter', 'the suspended team must not stay open')
   })
 
   await check('rotating a PIN revokes existing sessions', async () => {
@@ -343,14 +377,17 @@ async function main() {
     const rotated = await owner.post('/api/access/teams/75019D/pin', {})
     pinA = rotated.body.pin
     const after = await teamA.get('/api/access/me')
-    assert.equal(after.body.kind, 'public')
-    assert.equal(after.body.reason, 'revoked')
+    // Rotation closes the workspace but keeps the chapter session, so the team must be reopened.
+    assert.equal(after.body.kind, 'chapter')
+    assert.equal(after.body.team, null)
+    const reopen = await teamA.post('/api/access/chapter/team', { team: '75019D', pin: pinA })
+    assert.equal(reopen.status, 200)
   })
 
   await check('owner can revoke a device session by id', async () => {
     const sessions = await owner.get('/api/access/sessions')
     assert.ok(sessions.body.sessions.length > 0)
-    const target = sessions.body.sessions.find((s) => s.kind === 'team')
+    const target = sessions.body.sessions.find((s) => !s.revoked && s.kind !== 'owner')
     const res = await owner.del(`/api/access/sessions/${target.id}`)
     assert.equal(res.status, 200)
   })

@@ -16,16 +16,31 @@ const SESSION_KEY = 'override-lab:session'
 
 export function getSession() {
   try {
-    return localStorage.getItem(SESSION_KEY) || ''
+    return localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY) || ''
   } catch {
     return ''
   }
 }
 
-export function setSession(token) {
+/**
+ * Stores the opaque session token. "Remember this device" puts it in persistent storage; without
+ * it the token lives only for this tab, so closing the browser ends the authorization. The token
+ * itself is never a credential and can be revoked server-side.
+ */
+export function setSession(token, remember = true) {
   try {
-    if (token) localStorage.setItem(SESSION_KEY, token)
-    else localStorage.removeItem(SESSION_KEY)
+    if (!token) {
+      localStorage.removeItem(SESSION_KEY)
+      sessionStorage.removeItem(SESSION_KEY)
+      return
+    }
+    if (remember) {
+      localStorage.setItem(SESSION_KEY, token)
+      sessionStorage.removeItem(SESSION_KEY)
+    } else {
+      sessionStorage.setItem(SESSION_KEY, token)
+      localStorage.removeItem(SESSION_KEY)
+    }
   } catch {
     /* private mode: the session lasts for this tab only */
   }

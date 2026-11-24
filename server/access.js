@@ -382,7 +382,7 @@ export function removeTeam(chapterId, numberIn) {
   const team = teamNumber(numberIn)
   run('DELETE FROM chapter_teams WHERE chapter_id = ? AND team_number = ?', chapterId, team)
   run('UPDATE team_access SET chapter_id = NULL, status = ?, updated_at = ? WHERE team_number = ? AND chapter_id = ?', 'suspended', nowIso(), team, chapterId)
-  run('UPDATE device_sessions SET revoked_at = ? WHERE team_number = ? AND revoked_at IS NULL', nowIso(), team)
+  dropTeamAccess(team)
   return chapterView(get('SELECT * FROM chapters WHERE id = ?', chapterId))
 }
 
@@ -462,9 +462,7 @@ export function setTeamStatus(team, status) {
   const row = get('SELECT * FROM team_access WHERE team_number = ?', teamNumber(team))
   if (!row) throw Object.assign(new Error('unknown team workspace'), { status: 404 })
   run('UPDATE team_access SET status=?, updated_at=? WHERE team_number=?', status, nowIso(), teamNumber(team))
-  if (status !== 'approved' && status !== 'issued') {
-    run('UPDATE device_sessions SET revoked_at=? WHERE team_number=? AND revoked_at IS NULL', nowIso(), teamNumber(team))
-  }
+  if (status !== 'approved' && status !== 'issued') dropTeamAccess(teamNumber(team))
   audit({ action: 'team.status', team: teamNumber(team), detail: status })
   return getTeamAccess(team)
 }
@@ -477,10 +475,68 @@ export function issueTeamPin(numberIn) {
   const pin = generateCode(3)
   const { hash, salt } = hashSecret(pin)
   run('UPDATE team_access SET pin_hash=?, pin_salt=?, status=?, issued_at=?, updated_at=? WHERE team_number=?', hash, salt, 'issued', nowIso(), nowIso(), team)
-  // A rotated credential invalidates every device that used the old one.
-  run('UPDATE device_sessions SET revoked_at=? WHERE team_number=? AND revoked_at IS NULL', nowIso(), team)
+  // A rotated credential closes every workspace opened with the old one. A chapter session
+  // keeps its chapter access and only loses the team binding, so the team must be re-entered.
+  dropTeamAccess(team)
   audit({ action: 'team.pin.issued', team })
   return { pin, access: getTeamAccess(team) }
+}
+
+/** Ends every team-level authorization for a team without closing its chapter's session. */
+function dropTeamAccess(team) {
+  const number = teamNumber(team)
+  run("UPDATE device_sessions SET revoked_at=? WHERE team_number=? AND kind='team' AND revoked_at IS NULL", nowIso(), number)
+  run("UPDATE device_sessions SET team_number=NULL WHERE team_number=? AND kind='chapter'", number)
+}
+
+/** Opens a team inside an existing chapter session, keeping chapter access intact. */
+export async function chapterTeamLogin(access, { team, pin, ip = null }) {
+  if (!access?.sessionId) throw Object.assign(new Error('open your chapter first'), { status: 401, code: 'chapter_required' })
+  if (access.kind !== 'chapter' && !(access.kind === 'team' && access.viaChapter)) {
+    throw Object.assign(new Error('open your chapter first'), { status: 403, code: 'chapter_required' })
+  }
+  const number = teamNumber(team)
+  const key = `team:${number}:${ip || ''}`
+  if (rateLimited(key)) {
+    audit({ action: 'access.rate_limited', detail: { kind: 'team', team: number }, team: number, ip })
+    throw Object.assign(new Error('too many attempts — wait a few minutes and try again'), { status: 429 })
+  }
+  const row = get('SELECT * FROM team_access WHERE team_number = ?', number)
+  const fail = () => {
+    noteAttempt(key, false)
+    audit({ action: 'access.team.failed', team: number, ip })
+    throw Object.assign(new Error('that team access code was not recognised'), { status: 401 })
+  }
+  if (!row || !row.pin_hash) return fail()
+  if (row.chapter_id !== access.chapter) {
+    throw Object.assign(new Error('that team is not part of this chapter'), { status: 403 })
+  }
+  if (!matches(pin, row.pin_hash, row.pin_salt)) return fail()
+  if (!['approved', 'issued'].includes(row.status)) {
+    throw Object.assign(new Error('this team workspace is not currently enabled'), { status: 403 })
+  }
+  if (!(await seasonActive(null))) throw Object.assign(new Error('this season’s team access has ended'), { status: 403 })
+  noteAttempt(key, true)
+  run('UPDATE device_sessions SET team_number=? WHERE id=?', number, access.sessionId)
+  audit({
+    actorKind: 'team',
+    actorLabel: number,
+    team: number,
+    chapterId: access.chapter,
+    action: 'access.team.login',
+    detail: { via: 'chapter' },
+    ip
+  })
+  return { team: number, chapter: access.chapter }
+}
+
+/** Returns a chapter session from a team workspace back to its chapter dashboard. */
+export function chapterTeamLeave(access) {
+  if (!access?.sessionId || !(access.kind === 'team' && access.viaChapter)) {
+    throw Object.assign(new Error('no team is open'), { status: 400 })
+  }
+  run('UPDATE device_sessions SET team_number=NULL WHERE id=?', access.sessionId)
+  return { chapter: access.chapter }
 }
 
 export const revokeChapterElevation = (chapterId) => {
@@ -489,7 +545,7 @@ export const revokeChapterElevation = (chapterId) => {
 }
 
 export const revokeTeamSessions = (team) => {
-  run('UPDATE device_sessions SET revoked_at=? WHERE team_number=? AND revoked_at IS NULL', nowIso(), teamNumber(team))
+  dropTeamAccess(team)
   audit({ action: 'team.sessions.revoked', team: teamNumber(team) })
 }
 
@@ -580,17 +636,33 @@ export async function resolveAccess(req) {
     if (!chapter || chapter.status !== 'active') return { ...anonymous, reason: 'chapter_inactive' }
     if (!(await seasonActive(chapter.expires_at))) return { ...anonymous, reason: 'season_expired' }
     run('UPDATE device_sessions SET last_seen_at=? WHERE id=?', nowIso(), row.id)
-    return {
-      kind: 'chapter',
+
+    const base = {
       chapter: row.chapter_id,
       chapterName: chapter.name,
       // A chapter code opens the dashboard. Administrator controls need the separate chapter
       // admin password, which elevates this device session.
       admin: Boolean(chapter.admin_enabled && row.elevated),
-      features: ['chapter'],
-      team: null,
       owner: false,
       sessionId: row.id
+    }
+
+    // A team is unlocked *inside* the chapter session, so the device keeps chapter access and
+    // the team never becomes reachable without it. The holding chapter's own expiry, status and
+    // the team's permission set are all re-checked on every request.
+    if (!row.team_number) return { ...base, kind: 'chapter', features: ['chapter'], team: null }
+
+    const teamRow = get('SELECT * FROM team_access WHERE team_number = ?', row.team_number)
+    if (!teamRow || !['approved', 'issued'].includes(teamRow.status)) {
+      return { ...base, kind: 'chapter', features: ['chapter'], team: null, teamUnavailable: row.team_number }
+    }
+    if (!(await seasonActive(null))) return { ...anonymous, reason: 'season_expired' }
+    return {
+      ...base,
+      kind: 'team',
+      team: row.team_number,
+      features: parseFeatures(teamRow.features),
+      viaChapter: true
     }
   }
 
@@ -641,7 +713,7 @@ export async function chapterLogin({ code, label = null, ip = null }) {
   return { token: session.token, expiresAt: session.expiresAt, kind: 'chapter', chapter: getChapter(hit.id), admin: Boolean(hit.admin_enabled) }
 }
 
-export async function teamLogin({ team, pin, label = null, ip = null }) {
+export async function teamLogin({ team, pin, label = null, ip = null, access = null }) {
   const number = teamNumber(team)
   const key = `team:${number}:${ip || ''}`
   if (rateLimited(key)) {
@@ -665,6 +737,21 @@ export async function teamLogin({ team, pin, label = null, ip = null }) {
   const chapter = row.chapter_id ? get('SELECT * FROM chapters WHERE id = ?', row.chapter_id) : null
   if (row.chapter_id && (!chapter || chapter.status !== 'active')) {
     throw Object.assign(new Error('this team’s chapter is not currently active'), { status: 403 })
+  }
+  // A team that belongs to a chapter is only reachable from an authorized chapter session.
+  // The chapter code is not a team credential and the team code is not a chapter credential,
+  // so both are required, in that order.
+  if (row.chapter_id) {
+    const authorized =
+      isOwner(access) ||
+      (access?.kind === 'chapter' && access.chapter === row.chapter_id) ||
+      (access?.kind === 'team' && access.viaChapter && access.chapter === row.chapter_id)
+    if (!authorized) {
+      throw Object.assign(new Error('open your chapter and choose the team from there'), {
+        status: 403,
+        code: 'chapter_required'
+      })
+    }
   }
   if (chapter && !(await seasonActive(chapter.expires_at))) throw Object.assign(new Error('this chapter’s season access has ended'), { status: 403 })
   noteAttempt(key, true)
@@ -695,8 +782,10 @@ export const ownerConfigured = ownerEntryConfigured
  * factor without any code change.
  */
 export async function ownerBegin({ code, ip = null }) {
+  // A deployment with no owner configured must not advertise that an owner entry exists: it
+  // answers exactly like a wrong code.
   if (!ownerEntryConfigured()) {
-    throw Object.assign(new Error('owner access is not configured on this deployment'), { status: 503, code: 'owner_unconfigured' })
+    throw Object.assign(new Error('that access code was not recognised'), { status: 401 })
   }
   const key = `owner:${ip || 'unknown'}`
   if (rateLimited(key, { max: 5 })) {

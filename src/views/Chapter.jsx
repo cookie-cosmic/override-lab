@@ -1,90 +1,109 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useAccess } from '../access/AccessContext.jsx'
-import { api, fmt, pct, useApi } from '../api.js'
-import { Badge, Btn, Card, Empty, Field, Note, Stat, Table } from '../components/ui.jsx'
+import { api, pct, useApi } from '../api.js'
+import { Badge, Btn, Empty, Table } from '../components/ui.jsx'
 import Icon from '../components/Icons.jsx'
+import Help from '../components/Help.jsx'
 import { navigate } from '../router.js'
 import { AccessForm } from './AccessPanel.jsx'
+import UnlockDialog from './UnlockDialog.jsx'
 
-const STATUS_TONE = {
-  approved: 'good',
-  issued: 'good',
-  pending: 'warn',
-  not_requested: '',
-  suspended: 'bad',
-  expired: 'bad'
-}
-const STATUS_LABEL = {
-  approved: 'Access approved',
-  issued: 'Access issued',
-  pending: 'Request pending',
-  not_requested: 'Not requested',
-  suspended: 'Suspended',
-  expired: 'Expired'
+const AVAILABLE = ['approved', 'issued']
+const STATUS = {
+  approved: { label: 'Available', tone: 'good' },
+  issued: { label: 'Available', tone: 'good' },
+  not_requested: { label: 'Not issued', tone: '' },
+  pending: { label: 'Request pending', tone: 'warn' },
+  suspended: { label: 'Suspended', tone: 'bad' },
+  expired: { label: 'Expired', tone: 'bad' }
 }
 
-function TeamCard({ team, onUnlock, chapterId }) {
-  const { data: history } = useApi(`/api/history?team=${encodeURIComponent(team.team)}`)
-  const [requesting, setRequesting] = useState(false)
-  const [sent, setSent] = useState(false)
-  const [error, setError] = useState(null)
-  const record = history?.team ? history : null
+const label = (status) => STATUS[status] || { label: status || 'Not issued', tone: '' }
+const fmtDate = (v) => {
+  if (!v) return '—'
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
-  const request = async () => {
-    setRequesting(true)
-    setError(null)
-    try {
-      await api('/api/access/request', {
-        method: 'POST',
-        body: JSON.stringify({ team: team.team, chapterId, note: 'Requested from the chapter dashboard' })
-      })
-      setSent(true)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setRequesting(false)
-    }
-  }
+function TeamCard({ team, open, onOpen, onRequest, requesting }) {
+  const status = label(team.status)
+  const available = AVAILABLE.includes(team.status)
+  const record = team.record
+  const bestSkill = (team.skills || [])[0]
+  const event = team.upcoming || team.latestEvent
 
   return (
     <article className="team-card">
-      <header>
+      <div className="team-card-head">
         <div>
-          <h3 className="mono">{team.team}</h3>
-          <p className="tiny dim">{record?.season || 'Public record'} · official RobotEvents results</p>
+          <div className="num mono">{team.team}</div>
+          <div className="name">{team.name || 'Chapter team'}</div>
         </div>
-        <Badge tone={STATUS_TONE[team.status] || ''}>{STATUS_LABEL[team.status] || team.status}</Badge>
-      </header>
-
-      <div className="team-card-stats">
-        <div><span>Record</span><strong>{record ? `${record.wins ?? 0}–${record.losses ?? 0}–${record.ties ?? 0}` : '—'}</strong></div>
-        <div><span>Matches</span><strong>{record?.matches ?? '—'}</strong></div>
-        <div><span>Adj. win rate</span><strong>{record?.winRate != null ? pct(record.winRate) : '—'}</strong></div>
-        <div><span>Events</span><strong>{record?.events?.length ?? '—'}</strong></div>
+        <Badge tone={status.tone}>{status.label}</Badge>
       </div>
 
-      <div className="row wrap" style={{ gap: 6 }}>
-        <Btn size="sm" variant="ghost" onClick={() => navigate(`public/${team.team}`)}>Public statistics</Btn>
-        <Btn size="sm" variant="ghost" onClick={() => navigate(`team-login?team=${team.team}`)}>Enter team code</Btn>
-        {['approved', 'issued'].includes(team.status) ? (
-          <Btn size="sm" variant="primary" onClick={() => onUnlock(team.team)}>Unlock workspace</Btn>
-        ) : sent || team.status === 'pending' ? (
-          <Badge tone="warn">request pending</Badge>
+      <div className="team-metrics">
+        <div className="m">
+          <div className="l">Record</div>
+          <div className="v">{record ? `${record.wins}–${record.losses}–${record.ties}` : '—'}</div>
+        </div>
+        <div className="m">
+          <div className="l">Win rate</div>
+          <div className="v">{record?.winRate != null ? pct(record.winRate) : '—'}</div>
+        </div>
+        <div className="m">
+          <div className="l">Skills</div>
+          <div className="v">{bestSkill ? Math.round(bestSkill.score) : '—'}</div>
+        </div>
+      </div>
+
+      <div className="event-line">
+        {event ? (
+          <>
+            <strong>{team.upcoming ? 'Next event' : 'Latest event'}:</strong> {event.name || event.sku}
+            {event.start ? ` · ${fmtDate(event.start)}` : ''}
+          </>
         ) : (
-          <Btn size="sm" onClick={request} disabled={requesting}>{requesting ? 'Sending…' : 'Request access'}</Btn>
+          <span className="dim">No scored events this season yet.</span>
         )}
       </div>
-      {error && <p className="tiny bad">{error}</p>}
+
+      {team.awards?.length > 0 && (
+        <div className="row wrap" style={{ gap: 5 }}>
+          {team.awards.slice(0, 3).map((a) => (
+            <span className="chip" key={a}>{a}</span>
+          ))}
+          {team.awards.length > 3 && <span className="small dim">+{team.awards.length - 3}</span>}
+        </div>
+      )}
+
+      <div className="team-actions">
+        <Btn size="sm" variant="ghost" onClick={() => navigate(`teams?team=${team.team}`)}>
+          View Statistics
+        </Btn>
+        {available ? (
+          <Btn size="sm" variant="primary" onClick={onOpen}>
+            {open ? 'Go to workspace' : 'Open Workspace'}
+          </Btn>
+        ) : team.status === 'pending' ? (
+          <Btn size="sm" disabled>Request pending</Btn>
+        ) : (
+          <Btn size="sm" onClick={onRequest} disabled={requesting}>
+            {requesting ? 'Sending…' : 'Request access'}
+          </Btn>
+        )}
+      </div>
     </article>
   )
 }
 
-export default function Chapter() {
-  const { access, refresh } = useAccess()
+export default function Chapter({ query }) {
+  const { access, isChapter, refresh } = useAccess()
   const chapterId = access.chapter
   const { data, error, loading, reload } = useApi(chapterId ? `/api/access/chapters/${chapterId}` : null)
-  const [tab, setTab] = useState('teams')
+  const [tab, setTab] = useState(query?.get('tab') === 'codes' ? 'codes' : 'teams')
   const [unlock, setUnlock] = useState(null)
+  const [requesting, setRequesting] = useState(null)
 
   const chapter = data?.chapter
   const teams = data?.teams || []
@@ -93,60 +112,84 @@ export default function Chapter() {
   const totals = useMemo(
     () => ({
       teams: teams.length,
-      issued: teams.filter((t) => t.hasPin).length,
+      ready: teams.filter((t) => AVAILABLE.includes(t.status)).length,
       pending: teams.filter((t) => t.status === 'pending').length,
-      enabled: teams.filter((t) => ['approved', 'issued'].includes(t.status)).length
+      awards: teams.reduce((sum, t) => sum + (t.awards?.length || 0), 0)
     }),
     [teams]
   )
 
-  useEffect(() => {
-    if (unlock) setTab('teams')
-  }, [unlock])
+  const request = async (team) => {
+    setRequesting(team)
+    try {
+      await api('/api/access/request', {
+        method: 'POST',
+        body: JSON.stringify({ team, chapterId, note: 'Requested from the chapter dashboard' })
+      })
+      reload()
+    } catch {
+      /* the refresh below shows the real status */
+      reload()
+    } finally {
+      setRequesting(null)
+    }
+  }
 
-  if (!chapterId) {
+  if (!isChapter && !chapterId) {
     return (
-      <Card title="Chapter dashboard">
-        <p className="small">Enter a chapter access code to open its dashboard.</p>
-        <AccessForm compact onDone={() => window.location.reload()} />
-      </Card>
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1>Chapter access</h1>
+          <p className="auth-sub">Connect to your robotics chapter.</p>
+          <AccessForm compact initialMode="chapter" onDone={() => window.location.reload()} />
+        </div>
+      </div>
     )
   }
 
   if (loading && !data) return <div className="skeleton-block" aria-busy="true">Loading chapter…</div>
-  if (error) return <Note tone="bad">{error}</Note>
+  if (error) return <div className="note bad">The chapter could not be loaded. Try again in a moment.</div>
 
   return (
     <div>
-      <header className="page-head">
+      <header className="chapter-head">
         <div>
-          <div className="eyebrow">Chapter</div>
-          <h2>{chapter?.name || 'Chapter'}</h2>
-          <p className="small dim">
-            {chapter?.season || '2026–2027 · Override Season'}
-            {chapter?.expiresAt ? ` · access until ${new Date(chapter.expiresAt).toLocaleDateString()}` : ''}
-          </p>
+          <h1>{chapter?.name || 'Chapter'}</h1>
+          <div className="meta">
+            {chapter?.season || '2026–2027 Override Season'}
+            {chapter?.expiresAt ? ` · access to ${new Date(chapter.expiresAt).toLocaleDateString()}` : ''}
+          </div>
         </div>
-        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <div className="corner">
           <Badge tone={chapter?.status === 'active' ? 'good' : 'bad'}>{chapter?.status || 'active'}</Badge>
           <Btn size="sm" variant="ghost" onClick={() => navigate('chapter-admin')}>
-            {access.admin ? 'Administration' : 'Chapter admin'}
+            Administration
           </Btn>
         </div>
       </header>
 
-      <div className="stat-grid">
-        <Stat label="Chapter teams" value={totals.teams} sub="assigned by the owner" />
-        <Stat label="Workspaces enabled" value={totals.enabled} sub={`${totals.issued} with an issued PIN`} />
-        <Stat label="Pending requests" value={totals.pending} sub="awaiting owner approval" />
-        <Stat label="Your role" value={access.admin ? 'Chapter administrator' : 'Chapter member'} sub="private team records stay private" />
+      <div className="chapter-summary">
+        <div className="cs">
+          <div className="l">Chapter teams</div>
+          <div className="v">{totals.teams}</div>
+          <div className="s">assigned by the owner</div>
+        </div>
+        <div className="cs">
+          <div className="l">Workspaces ready</div>
+          <div className="v">{totals.ready}</div>
+          <div className="s">private access issued</div>
+        </div>
+        <div className="cs">
+          <div className="l">Access requests</div>
+          <div className="v">{totals.pending}</div>
+          <div className="s">awaiting approval</div>
+        </div>
+        <div className="cs">
+          <div className="l">Awards</div>
+          <div className="v">{totals.awards}</div>
+          <div className="s">published this season</div>
+        </div>
       </div>
-
-      <Note>
-        Chapter access shows official public results and each team&apos;s access status. Each team opens its own workspace
-        with its own code — a chapter code never unlocks one. This panel does not display any team&apos;s strategies,
-        scouting notes, predictions, schedules or code.
-      </Note>
 
       <nav className="tabs" aria-label="Chapter sections">
         <button type="button" className={`tab ${tab === 'teams' ? 'active' : ''}`} onClick={() => setTab('teams')}>
@@ -161,7 +204,14 @@ export default function Chapter() {
         <>
           <div className="team-grid">
             {teams.map((team) => (
-              <TeamCard key={team.team} team={team} chapterId={chapterId} onUnlock={setUnlock} />
+              <TeamCard
+                key={team.team}
+                team={team}
+                open={access.team === team.team}
+                onOpen={() => (access.team === team.team ? navigate('home') : setUnlock(team))}
+                onRequest={() => request(team.team)}
+                requesting={requesting === team.team}
+              />
             ))}
           </div>
           {!teams.length && <Empty>No teams are assigned to this chapter yet.</Empty>}
@@ -169,75 +219,78 @@ export default function Chapter() {
       )}
 
       {tab === 'codes' && (
-        <Card title="Access codes" subtitle="status only — codes and PINs are never shown here">
-          <Table head={['Team', 'Status', 'PIN issued', 'Last seen', 'Action']}>
-            {teams.map((team) => (
-              <tr key={team.team}>
-                <td className="mono">{team.team}</td>
-                <td><Badge tone={STATUS_TONE[team.status] || ''}>{STATUS_LABEL[team.status] || team.status}</Badge></td>
-                <td>{team.hasPin ? 'yes' : 'no'}</td>
-                <td className="tiny dim">{team.lastSeenAt ? new Date(team.lastSeenAt).toLocaleString() : '—'}</td>
-                <td>
-                  {['approved', 'issued'].includes(team.status) ? (
-                    <div className="row" style={{ gap: 4 }}>
-                      <Btn size="sm" variant="ghost" onClick={() => navigate(`team-login?team=${team.team}`)}>Team sign-in</Btn>
-                      <Btn size="sm" variant="ghost" onClick={() => setUnlock(team.team)}>Unlock here</Btn>
-                    </div>
-                  ) : team.status === 'pending' ? (
-                    <span className="tiny dim">awaiting owner</span>
-                  ) : (
-                    <Btn
-                      size="sm"
-                      variant="ghost"
-                      onClick={async () => {
-                        await api('/api/access/request', {
-                          method: 'POST',
-                          body: JSON.stringify({ team: team.team, chapterId })
-                        }).catch(() => {})
-                        reload()
-                      }}
-                    >
-                      Request
-                    </Btn>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </Table>
-          {!teams.length && <Empty>No teams assigned.</Empty>}
-          {requests.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <h3 className="small">Requests from this chapter</h3>
-              <Table head={['Team', 'Status', 'Submitted']}>
-                {requests.map((r) => (
-                  <tr key={r.id}>
-                    <td className="mono">{r.team}</td>
-                    <td><Badge tone={STATUS_TONE[r.status] || ''}>{r.status}</Badge></td>
-                    <td className="tiny dim">{new Date(r.createdAt).toLocaleString()}</td>
+        <div className="card">
+          <div className="card-h">
+            <h2>Access codes</h2>
+            <span className="sub">status only — codes are never shown</span>
+          </div>
+          <div className="card-b flush">
+            <Table head={['Team', 'Status', 'Code', 'Last used', '']}>
+              {teams.map((team) => {
+                const status = label(team.status)
+                return (
+                  <tr key={team.team}>
+                    <td className="mono">{team.team}</td>
+                    <td><Badge tone={status.tone}>{status.label}</Badge></td>
+                    <td className="tiny dim">{team.hasPin ? 'Issued privately' : 'Not issued'}</td>
+                    <td className="tiny dim">{team.lastSeenAt ? new Date(team.lastSeenAt).toLocaleString() : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {AVAILABLE.includes(team.status) ? (
+                        <Btn size="sm" variant="ghost" onClick={() => setUnlock(team)}>Open workspace</Btn>
+                      ) : team.status === 'pending' ? (
+                        <span className="tiny dim">awaiting owner</span>
+                      ) : (
+                        <Btn size="sm" variant="ghost" disabled={requesting === team.team} onClick={() => request(team.team)}>
+                          {requesting === team.team ? 'Sending…' : 'Request access'}
+                        </Btn>
+                      )}
+                    </td>
                   </tr>
-                ))}
-              </Table>
-            </div>
-          )}
-          <Note tone="warn">
-            Only the platform owner can approve a workspace or issue a PIN. Submitting a request does not grant access.
-          </Note>
-        </Card>
+                )
+              })}
+            </Table>
+            {!teams.length && <Empty>No teams assigned.</Empty>}
+          </div>
+        </div>
       )}
 
+      {tab === 'codes' && requests.length > 0 && (
+        <div className="card">
+          <div className="card-h"><h2>Your requests</h2></div>
+          <div className="card-b flush">
+            <Table head={['Team', 'Status', 'Submitted']}>
+              {requests.map((r) => (
+                <tr key={r.id}>
+                  <td className="mono">{r.team}</td>
+                  <td><Badge tone={label(r.status).tone}>{label(r.status).label}</Badge></td>
+                  <td className="tiny dim">{new Date(r.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </Table>
+          </div>
+        </div>
+      )}
+
+      <p className="tiny dim" style={{ marginTop: 14 }}>
+        Chapter view shows official public results and access status only. Team workspace credentials are issued by the
+        owner and are never displayed here.{' '}
+        <Help label="Why are strategies missing?">
+          A chapter code opens the dashboard, not a team&apos;s private work. Strategies, scouting notes and predictions
+          stay inside each team&apos;s own workspace.
+        </Help>
+      </p>
+
       {unlock && (
-        <Card title={`Unlock ${unlock}`} subtitle="team PIN required — a chapter code is not enough">
-          <AccessForm
-            compact
-            onDone={async () => {
-              setUnlock(null)
-              await refresh()
-              reload()
-              navigate('home')
-            }}
-          />
-          <Btn size="sm" variant="ghost" onClick={() => setUnlock(null)}>Cancel</Btn>
-        </Card>
+        <UnlockDialog
+          team={unlock}
+          onClose={() => setUnlock(null)}
+          onUnlocked={async () => {
+            setUnlock(null)
+            await refresh()
+            reload()
+            navigate('home')
+          }}
+        />
       )}
     </div>
   )

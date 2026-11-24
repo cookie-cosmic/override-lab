@@ -1,17 +1,20 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { useAccess } from '../access/AccessContext.jsx'
-import { Badge, Btn, Card, Field, Note } from '../components/ui.jsx'
+import { Badge, Btn, Card, Note } from '../components/ui.jsx'
 import Icon from '../components/Icons.jsx'
 
+const normaliseCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, '')
+
 /**
- * One access field for everyone: a chapter code opens the chapter dashboard, a team's PIN opens
- * its private workspace. The platform owner's configured entry code starts the owner
- * verification flow from the same field — the public UI never says so, and knowing a code is
- * never enough on its own.
+ * One access field for everyone.
+ *
+ * A chapter code opens the chapter dashboard. A team code opens that team's workspace from
+ * inside the chapter. The owner entry code starts owner verification from the same field — the
+ * interface never says so, and a code alone is never enough.
  */
 export function AccessForm({ compact = false, onDone, initialMode = 'chapter', initialTeam = '' }) {
   const { loginChapter, loginTeam, ownerBegin, ownerVerify } = useAccess()
-  const [mode, setMode] = useState(initialMode)
+  const mode = initialMode
   const [code, setCode] = useState('')
   const [pin, setPin] = useState('')
   const [team, setTeam] = useState(initialTeam)
@@ -20,12 +23,8 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const reset = () => setError(null)
-
-  const normaliseCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, '')
-
-  /** The owner entry code opens the admin panel from either field. */
-  const tryAdmin = async (value) => {
+  /** Silent owner entry: only ever attempted after an ordinary code is refused. */
+  const tryOwner = async (value) => {
     try {
       const started = await ownerBegin(value)
       if (started?.token) {
@@ -38,8 +37,6 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
       }
       return false
     } catch {
-      // Not an admin code. The caller shows the ordinary sign-in error instead, so a mistyped
-      // chapter code never turns into a message about administrator configuration.
       return false
     }
   }
@@ -49,35 +46,24 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
     setError(null)
     setBusy(true)
     try {
-      if (mode === 'chapter') {
-        try {
-          const out = await loginChapter(code)
+      if (mode === 'team') {
+        if (!pin) throw new Error('Enter the team access code.')
+        const out = await loginTeam(team, pin)
+        setPin('')
+        onDone && onDone(out)
+        return
+      }
+      try {
+        const out = await loginChapter(code)
+        setCode('')
+        onDone && onDone(out)
+      } catch (err) {
+        if (err.status === 401 && (await tryOwner(code))) {
           setCode('')
-          onDone && onDone(out)
-          return
-        } catch (err) {
-          // A failed chapter lookup is retried once as an admin entry; nothing about the
-          // failure says which kind of code was expected.
-          if (err.status === 401 && (await tryAdmin(code))) {
-            setCode('')
-            return
-          }
-          throw err
-        }
-      }
-
-      // An admin code typed into the team field needs no PIN.
-      if (!pin) {
-        if (await tryAdmin(team)) {
-          setTeam('')
           return
         }
-        throw new Error('Enter the team number and its access code, or an administrator code.')
+        throw err
       }
-
-      const out = await loginTeam(team, pin)
-      setPin('')
-      onDone && onDone(out)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -103,25 +89,23 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
 
   if (challenge) {
     return (
-      <form onSubmit={submitTotp} className="access-form">
-        <p className="tiny">
-          Verify this device with the authenticator registered for this deployment. A code alone
-          does not sign in.
-        </p>
-        <Field label="Authenticator code">
+      <form onSubmit={submitTotp} className="auth-form">
+        <div className="field" style={{ margin: 0 }}>
+          <label htmlFor="ol-verify">Verification code</label>
           <input
+            id="ol-verify"
             value={totp}
             onChange={(e) => setTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
             inputMode="numeric"
             autoComplete="one-time-code"
-            placeholder="123 456"
-            aria-label="Authenticator code"
+            placeholder="6-digit code"
             autoFocus
           />
-        </Field>
-        {error && <p className="small bad">{error}</p>}
+          <span className="hint">Enter the current code from your authenticator app.</span>
+        </div>
+        {error && <p className="modal-error" role="alert">{error}</p>}
         <div className="row" style={{ gap: 8 }}>
-          <Btn type="submit" variant="primary" disabled={busy || totp.length !== 6}>
+          <Btn type="submit" variant="primary" block disabled={busy || totp.length !== 6}>
             {busy ? 'Verifying…' : 'Verify'}
           </Btn>
           <Btn variant="ghost" onClick={() => { setChallenge(null); setTotp(''); setError(null) }}>
@@ -132,60 +116,61 @@ export function AccessForm({ compact = false, onDone, initialMode = 'chapter', i
     )
   }
 
-  return (
-    <form onSubmit={submit} className="access-form">
-      {!compact && (
-        <div className="seg" role="tablist" aria-label="Access type">
-          <button type="button" role="tab" aria-selected={mode === 'chapter'} className={mode === 'chapter' ? 'on' : ''} onClick={() => { setMode('chapter'); reset() }}>
-            Chapter
-          </button>
-          <button type="button" role="tab" aria-selected={mode === 'team'} className={mode === 'team' ? 'on' : ''} onClick={() => { setMode('team'); reset() }}>
-            Team workspace
-          </button>
-        </div>
-      )}
-
-      {mode === 'chapter' ? (
-        <Field label="Access code" hint="Chapter codes, and the administrator code, are accepted here. Codes are never stored in this browser.">
+  if (mode === 'team') {
+    return (
+      <form onSubmit={submit} className="auth-form">
+        <div className="field" style={{ margin: 0 }}>
+          <label htmlFor="ol-team-number">Team number</label>
           <input
-            value={code}
-            onChange={(e) => setCode(normaliseCode(e.target.value))}
-            placeholder="XXXX-XXXX-XXXX"
+            id="ol-team-number"
+            value={team}
+            onChange={(e) => setTeam(e.target.value.toUpperCase().replace(/[^0-9A-Z-]/g, '').slice(0, 32))}
+            placeholder="Team number"
             autoComplete="off"
             spellCheck={false}
-            inputMode="text"
-            aria-label="Access code"
           />
-        </Field>
-      ) : (
-        <>
-          <Field label="Team number" hint="An administrator code can be entered here instead.">
-            <input
-              value={team}
-              onChange={(e) => setTeam(e.target.value.toUpperCase().replace(/[^0-9A-Z-]/g, '').slice(0, 32))}
-              placeholder="75019D"
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="Team number"
-            />
-          </Field>
-          <Field label="Team PIN" hint="Issued privately to your team captain. It is not your team number.">
-            <input
-              value={pin}
-              onChange={(e) => setPin(normaliseCode(e.target.value))}
-              placeholder="XXXX-XXXX-XXXX"
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="Team PIN"
-            />
-          </Field>
-        </>
-      )}
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label htmlFor="ol-team-code">Team access code</label>
+          <input
+            id="ol-team-code"
+            value={pin}
+            onChange={(e) => setPin(normaliseCode(e.target.value))}
+            placeholder="Team access code"
+            autoComplete="off"
+            spellCheck={false}
+            type="password"
+          />
+          <span className="hint">Contact your team captain if you need your access code.</span>
+        </div>
+        {error && <p className="modal-error" role="alert">{error}</p>}
+        <Btn type="submit" variant="primary" block disabled={busy || !team}>
+          {busy ? 'Unlocking…' : 'Unlock workspace'}
+        </Btn>
+      </form>
+    )
+  }
 
-      {error && <p className="small bad" role="alert">{error}</p>}
-
-      <Btn type="submit" variant="primary" disabled={busy || (mode === 'chapter' ? !code : !team)}>
-        {busy ? 'Checking…' : mode === 'chapter' ? 'Continue' : 'Unlock workspace'}
+  return (
+    <form onSubmit={submit} className="auth-form">
+      <div className="field" style={{ margin: 0 }}>
+        <label htmlFor="ol-access-code" className={compact ? 'sr-only' : undefined}>
+          Access code
+        </label>
+        <input
+          id="ol-access-code"
+          value={code}
+          onChange={(e) => setCode(normaliseCode(e.target.value))}
+          placeholder="Enter your access code"
+          autoComplete="off"
+          spellCheck={false}
+          inputMode="text"
+          aria-label="Access code"
+        />
+      </div>
+      {error && <p className="modal-error" role="alert">{error}</p>}
+      <Btn type="submit" variant="primary" block disabled={busy || !code}>
+        {busy ? 'Checking…' : 'Continue'}
       </Btn>
     </form>
   )
@@ -197,27 +182,23 @@ export function LockedPanel({ feature, title, note }) {
   const [form, setForm] = useState(false)
   return (
     <Card
-      title={title || 'Approved team workspace required'}
+      title={title || 'Team workspace required'}
       subtitle={feature ? `feature: ${feature}` : null}
       right={<Badge tone="warn">locked</Badge>}
     >
       <p className="small">
-        {note ||
-          'This is private competitive intelligence. It is available to approved team workspaces only — a chapter code alone does not unlock it, and neither does typing a team number.'}
+        {note || 'This is private competitive intelligence. It is available inside an approved team workspace.'}
       </p>
       {access?.kind === 'chapter' && (
-        <Note tone="warn">
-          You are in the chapter dashboard. Select a team and enter that team&apos;s own PIN to open its workspace.
-        </Note>
+        <Note tone="warn">Select a team on your chapter dashboard and enter that team&apos;s access code.</Note>
       )}
       {access?.kind === 'team' && (
         <Note tone="warn">
-          Your team session is active, but this feature is not enabled for {access.team}. Ask the platform owner to
-          enable it — the server refuses the request until then.
+          This tool is not enabled for {access.team}. Ask your chapter coordinator to enable it.
         </Note>
       )}
       {isOwner ? (
-        <p className="small">Owner sessions see every feature. If you are seeing this, reload the page.</p>
+        <p className="small">Owner sessions see every tool.</p>
       ) : (
         <>
           {!form ? (

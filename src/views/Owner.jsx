@@ -135,12 +135,9 @@ export default function Owner() {
 
   if (!isOwner) {
     return (
-      <Card title="Owner Control Center">
-        <p className="small">This console is available only to an authenticated platform owner session.</p>
-        <Note tone="warn">
-          Owner sign-in needs the deployment&apos;s owner entry code and a current authenticator code. Discovering this
-          route grants nothing: every request here is rejected without an owner session.
-        </Note>
+      <Card title="Restricted">
+        <p className="small">This area is not available for this session.</p>
+        <Btn size="sm" variant="ghost" onClick={() => navigate('home')}>Back to the homepage</Btn>
       </Card>
     )
   }

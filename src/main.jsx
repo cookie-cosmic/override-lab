@@ -6,6 +6,7 @@ import './styles.css'
 import './styles-platform.css'
 import './styles-redesign.css'
 import './styles-workspace.css'
+import './styles-design.css'
 
 // Apply the stored theme before the first paint so the app never flashes the wrong skin.
 applyTheme(getTheme())
