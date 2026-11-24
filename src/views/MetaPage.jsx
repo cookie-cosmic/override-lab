@@ -24,7 +24,7 @@ export default function MetaPage({ sku, navigate }) {
       </div>
 
       <div className="split">
-        <Card title="What actually predicts winning here" subtitle="team-level Pearson correlation with win rate">
+        <Card title="What actually predicts winning here" subtitle="team-level Pearson correlation with adjusted win rate">
           <Table head={['Relationship', { label: 'r', cls: 'num' }, { label: 'n', cls: 'num' }, 'Strength']} wrap={false}>
             {data.correlations.map((c) => (
               <tr key={c.label}>
@@ -67,7 +67,7 @@ export default function MetaPage({ sku, navigate }) {
       </div>
 
       <Card title="Archetypes" subtitle="k-means over event-normalised style features">
-        <Table head={['Archetype', { label: 'Teams', cls: 'num' }, 'Signature', { label: 'Avg pts', cls: 'num' }, { label: 'Win rate', cls: 'num' }, { label: 'Avg Elo', cls: 'num' }, 'Members']} wrap={false}>
+        <Table head={['Archetype', { label: 'Teams', cls: 'num' }, 'Signature', { label: 'Avg pts', cls: 'num' }, { label: 'Adj. win rate', cls: 'num' }, { label: 'Avg Elo', cls: 'num' }, 'Members']} wrap={false}>
           {data.archetypePerformance.map((a) => (
             <tr key={a.label}>
               <td>

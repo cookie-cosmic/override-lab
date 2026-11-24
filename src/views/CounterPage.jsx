@@ -35,7 +35,7 @@ const COMPARE = [
   ['driverPerMatch', 'Driver phase'],
   ['penaltyPerMatch', 'Penalties'],
   ['cv', 'CV (lower is steadier)'],
-  ['winRate', 'Win rate']
+  ['winRate', 'Adjusted win rate']
 ]
 
 const formString = (form) =>

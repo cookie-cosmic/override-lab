@@ -5,103 +5,218 @@ import Matches from './views/Matches.jsx'
 import TeamPage from './views/TeamPage.jsx'
 import CounterPage from './views/CounterPage.jsx'
 import MetaPage from './views/MetaPage.jsx'
-import DataPage from './views/DataPage.jsx'
 import Onsite from './views/Onsite.jsx'
-import Sim from './views/Sim.jsx'
-import Simulator from './views/Simulator.jsx'
 import Stream from './views/Stream.jsx'
-import Start from './views/Start.jsx'
 import Landing from './views/Landing.jsx'
 import Dashboard from './views/Dashboard.jsx'
-import MyTeams from './views/MyTeams.jsx'
 import Tournaments from './views/Tournaments.jsx'
 import Scouting from './views/Scouting.jsx'
 import Alliance from './views/Alliance.jsx'
 import Field from './views/Field.jsx'
-import Autonomous from './views/Autonomous.jsx'
 import Testing from './views/Testing.jsx'
 import Rules from './views/Rules.jsx'
 import Settings from './views/Settings.jsx'
+import EventTable from './views/EventTable.jsx'
 import { Empty, Btn } from './components/ui.jsx'
-import ApiKey from './components/ApiKey.jsx'
+import Icon from './components/Icons.jsx'
+import CommandPalette from './components/CommandPalette.jsx'
 import TeamSwitcher from './components/TeamSwitcher.jsx'
 import { TeamProvider, useTeam } from './team/TeamContext.jsx'
 import { navigate, parseHash } from './router.js'
+import { THEMES, useTheme } from './theme.js'
 
-const ROUTES = [
-  { id: 'dashboard', label: 'My dashboard', icon: '◫', group: 'My team' },
-  { id: 'teams', label: 'My teams', icon: '◉', group: 'My team' },
-  { id: 'tournaments', label: 'Tournaments', icon: '⌖', group: 'My team' },
-
-  { id: 'scouting', label: 'Scouting', icon: '◎', group: 'Tools' },
-  { id: 'alliance', label: 'Alliance analysis', icon: '⇄', group: 'Tools' },
-  { id: 'field', label: 'Field simulator', icon: '▩', group: 'Tools' },
-  { id: 'autonomous', label: 'Autonomous planner', icon: '⟜', group: 'Tools' },
-  { id: 'testing', label: 'Robot testing', icon: '◍', group: 'Tools' },
-  { id: 'rules', label: 'Rules & Q&A', icon: '¶', group: 'Tools' },
-
-  { id: 'start', label: 'Find a competition', icon: '⌖', group: 'Review' },
-  { id: 'overview', label: 'Overview', icon: '▤', group: 'Review' },
-  { id: 'matches', label: 'Matches', icon: '▥', group: 'Review' },
-  { id: 'stream', label: 'Stream analysis', icon: '▶', group: 'Review' },
-  { id: 'onsite', label: 'Onsite', icon: '⚡', group: 'Review' },
-
-  { id: 'sim', label: 'Simulation', icon: '◈', group: 'Analysis' },
-  { id: 'simulator', label: 'Override sim', icon: '▦', group: 'Analysis' },
-  { id: 'team', label: 'Team lab', icon: '◆', group: 'Analysis' },
-  { id: 'counter', label: 'Opponent & counters', icon: '⚔', group: 'Analysis' },
-  { id: 'meta', label: 'Meta & model', icon: '▣', group: 'Analysis' },
-
-  { id: 'data', label: 'Data & ingest', icon: '⤓', group: 'Data' },
-  { id: 'settings', label: 'Settings', icon: '⚙', group: 'Data' }
+// Nine destinations. Everything else is a tab, a panel or a link inside one of these.
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', group: 'Main' },
+  { id: 'tournaments', label: 'Tournaments', icon: 'trophy', group: 'Competition' },
+  { id: 'competition', label: 'Competition Day', icon: 'zap', group: 'Competition' },
+  { id: 'scouting', label: 'Scouting', icon: 'clipboard', group: 'Competition' },
+  { id: 'alliance', label: 'Alliance Strategy', icon: 'users', group: 'Competition' },
+  { id: 'field', label: 'Field Simulator', icon: 'grid', group: 'Development' },
+  { id: 'testing', label: 'Robot Testing', icon: 'wrench', group: 'Development' },
+  { id: 'rules', label: 'Rules & Q&A', icon: 'book', group: 'Resources' },
+  { id: 'settings', label: 'Settings', icon: 'settings', group: 'Account' }
 ]
-const NAV_GROUPS = ['My team', 'Tools', 'Review', 'Analysis', 'Data']
-const titleFor = (id) => ROUTES.find((r) => r.id === id)?.label || 'Override Lab'
+const NAV_GROUPS = ['Main', 'Competition', 'Development', 'Resources']
+const TITLES = {
+  dashboard: 'Dashboard',
+  tournaments: 'Tournaments',
+  competition: 'Competition Day',
+  scouting: 'Scouting',
+  alliance: 'Alliance Strategy',
+  field: 'Field Simulator',
+  testing: 'Robot Testing',
+  rules: 'Rules & Q&A',
+  settings: 'Settings',
+  welcome: 'Override Lab'
+}
+const EVENT_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'matches', label: 'Matches' },
+  { id: 'rankings', label: 'Rankings' },
+  { id: 'skills', label: 'Skills' },
+  { id: 'eliminations', label: 'Eliminations' },
+  { id: 'stream', label: 'Video Review' }
+]
+const EVENT_VIEWS = new Set([...EVENT_TABS.map((t) => t.id), 'team', 'counter', 'meta'])
+// Old bookmarks keep working; the standalone categories they belonged to are gone.
+const LEGACY = {
+  autonomous: () => 'testing',
+  onsite: (sku, segs) => `competition${sku ? `/${sku}` : ''}`,
+  start: () => 'tournaments',
+  simulator: () => 'field',
+  sim: () => 'alliance',
+  meta: (sku) => `alliance${sku ? `?event=${sku}` : ''}`,
+  data: () => 'settings',
+  teams: () => 'settings',
+  counter: (sku, segs) => (sku ? `scouting/${sku}${segs[2] ? `?opp=${segs[2]}` : ''}` : 'scouting')
+}
 
-function NavSection({ label, ids, view, pathFor, go, collapsible = true, defaultOpen = false }) {
-  const activeInside = ids.includes(view)
-  const [open, setOpen] = useState(defaultOpen || activeInside)
-  useEffect(() => {
-    if (activeInside) setOpen(true)
-  }, [activeInside])
-  const links = ids.map((id) => ROUTES.find((r) => r.id === id)).filter(Boolean)
-  const expanded = collapsible ? open : true
+const d = (v) => {
+  const x = new Date(v || '')
+  return Number.isNaN(x.getTime()) ? '' : x.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+const readStoredEvent = () => {
+  try {
+    return {
+      sku: localStorage.getItem('override-lab:event') || null,
+      name: localStorage.getItem('override-lab:event-name') || null
+    }
+  } catch {
+    return { sku: null, name: null }
+  }
+}
+
+function NavLink({ item, active, collapsed, onClick }) {
   return (
-    <div className={`nav-section ${expanded ? 'open' : ''}`}>
-      {collapsible ? (
-        <button type="button" className="nav-toggle" aria-expanded={expanded} onClick={() => setOpen((v) => !v)}>
-          <span className="nav-label">{label}</span>
-          <span className="nav-caret" aria-hidden="true">▾</span>
-        </button>
-      ) : (
-        <div className="nav-label">{label}</div>
-      )}
-      <div className="nav-collapse">
-        <div className="nav-items">
-          {links.map((r) => (
-            <a
-              key={r.id}
-              href={`#/${pathFor(r.id)}`}
-              className={view === r.id ? 'active' : ''}
-              onClick={(e) => {
-                e.preventDefault()
-                go(pathFor(r.id))
+    <a
+      href={`#/${item.id}`}
+      className={`nav-link ${active ? 'active' : ''}`}
+      title={collapsed ? item.label : undefined}
+      aria-current={active ? 'page' : undefined}
+      onClick={(e) => {
+        e.preventDefault()
+        onClick(item.id)
+      }}
+    >
+      <span className="nav-ico"><Icon name={item.icon} size={18} /></span>
+      <span className="nav-text">{item.label}</span>
+    </a>
+  )
+}
+
+function ThemeMenu() {
+  const [theme, setTheme] = useTheme()
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => box.current && !box.current.contains(e.target) && setOpen(false)
+    const onKey = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  const current = THEMES.find((t) => t.id === theme) || THEMES[2]
+  return (
+    <div className="theme-menu" ref={box}>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Colour theme: ${current.label}`}
+        title={`Colour theme: ${current.label}`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name={current.icon} size={17} />
+      </button>
+      {open && (
+        <div className="theme-pop" role="menu">
+          {THEMES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={theme === t.id}
+              className={theme === t.id ? 'on' : ''}
+              onClick={() => {
+                setTheme(t.id)
+                setOpen(false)
               }}
             >
-              <span className="ico" aria-hidden="true">{r.icon}</span>
-              {r.label}
-            </a>
+              <Icon name={t.icon} size={15} />
+              {t.label}
+              {theme === t.id && <span className="theme-check">✓</span>}
+            </button>
           ))}
         </div>
-      </div>
+      )}
     </div>
   )
 }
-const MODEL_VIEWS = new Set(['overview', 'matches', 'stream', 'onsite', 'team', 'counter', 'meta', 'data', 'sim'])
+
+function EventWorkspace({ view, event, sku, go, children, query = '' }) {
+  return (
+    <div>
+      <section className="event-head">
+        <div>
+          <div className="eyebrow">Tournament review</div>
+          <h2>{event?.name || 'Tournament'}</h2>
+          <div className="event-head-meta">
+            {event?.start_date ? <span className="mono">{d(event.start_date)}</span> : null}
+            {event?.sku ? <span className="mono dim">{event.sku}</span> : null}
+            {event?.season ? <span className="dim">{event.season}</span> : null}
+            {event?.transient ? <span className="badge warn">unsaved session</span> : null}
+            {event?.match_count != null ? <span className="dim">{event.match_count} matches</span> : null}
+            {sku ? (
+              <a className="link tiny" href={`https://www.robotevents.com/robot-competitions/vex-robotics-competition/${sku}.html`} target="_blank" rel="noreferrer">
+                Official event ↗
+              </a>
+            ) : null}
+          </div>
+        </div>
+        <Btn size="sm" variant="ghost" onClick={() => go('tournaments')}>
+          All tournaments
+        </Btn>
+      </section>
+      <nav className="tabs event-tabs" aria-label="Tournament sections">
+        {EVENT_TABS.map((t) => (
+          <a
+            key={t.id}
+            href={`#/${t.id}/${sku || ''}${query ? `?${query}` : ''}`}
+            className={`tab ${view === t.id ? 'active' : ''}`}
+            aria-current={view === t.id ? 'page' : undefined}
+            onClick={(e) => {
+              e.preventDefault()
+              go(`${t.id}/${sku || ''}${query ? `?${query}` : ''}`)
+            }}
+          >
+            {t.label}
+          </a>
+        ))}
+      </nav>
+      <div className="content-body">{children}</div>
+    </div>
+  )
+}
 
 function Shell() {
-  const { active, addTeam, hasTeams } = useTeam()
+  const { active, addTeam, hasTeams, teams } = useTeam()
   const [route, setRoute] = useState(parseHash)
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('override-lab:sidebar') === 'collapsed'
+    } catch {
+      return false
+    }
+  })
+  const [drawer, setDrawer] = useState(false)
+  const [palette, setPalette] = useState(false)
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash())
@@ -109,7 +224,18 @@ function Shell() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const { data: eventsData, loading: eventsLoading, reload: reloadEvents } = useApi(endpoints.events())
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPalette((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const { data: eventsData, loading: eventsLoading } = useApi(endpoints.events())
   const events = eventsData?.events || []
   const [live, setLive] = useState(() => {
     try {
@@ -120,69 +246,123 @@ function Shell() {
   })
   const [liveInfo, setLiveInfo] = useState(null)
   const [syncing, setSyncing] = useState(false)
-  const [syncedAt, setSyncedAt] = useState(null)
   const [syncError, setSyncError] = useState(null)
   const [dataKey, setDataKey] = useState(0)
   const syncBusy = useRef(false)
 
+  const [storedEvent, setStoredEvent] = useState(readStoredEvent)
+
   const rawView = route.segs[0]
-  const known = ROUTES.some((r) => r.id === rawView)
   const welcome = !rawView || rawView === 'welcome'
-  const view = welcome ? 'welcome' : known ? rawView : hasTeams ? 'dashboard' : 'welcome'
-  const sku = route.segs[1] || events[0]?.sku || null
+  const known = NAV.some((r) => r.id === rawView) || EVENT_VIEWS.has(rawView)
+  const sku = route.segs[1] || null
+  const view = welcome ? 'welcome' : known ? rawView : 'dashboard'
   const param = route.segs[2] || null
 
+  const eventName = route.q.get('name')
   const event =
     events.find((e) => e.sku === sku) ||
+    (eventName ? { sku, name: eventName, start_date: route.q.get('start') || null } : null) ||
+    (!sku && storedEvent.sku ? { sku: storedEvent.sku, name: storedEvent.name, start_date: null } : null) ||
     (live && liveInfo && liveInfo.sku === sku
       ? { sku: liveInfo.sku, name: liveInfo.name, transient: true, match_count: liveInfo.matches }
       : null)
-  const go = (path) => navigate(path)
 
-  // Every team-scoped view falls back to the active team, so the URL stays optional and a
-  // switch changes the context of the tool immediately.
-  const currentTeam =
-    view === 'team' || view === 'onsite' || view === 'sim'
-      ? param || active?.number
-      : view === 'counter'
-        ? route.q.get('own') || active?.number
-        : active?.number
+  // Legacy bookmarks from the old 21-link navigation land on their new home.
+  useEffect(() => {
+    if (welcome || known) return
+    const map = LEGACY[rawView]
+    if (map) {
+      const target = map(sku, route.segs)
+      if (target) window.location.replace(`#/${target}`)
+      return
+    }
+    if (!hasTeams) return
+    window.location.replace('#/dashboard')
+  }, [rawView, sku, known, welcome, hasTeams, route.segs])
 
-  const pathFor = (id, eventSku = sku) => {
-    const base = `${id}/${eventSku || ''}`
-    if (id === 'team' || id === 'onsite' || id === 'sim') return currentTeam ? `${base}/${encodeURIComponent(currentTeam)}` : base
-    if (id === 'counter') return currentTeam ? `${base}?own=${encodeURIComponent(currentTeam)}` : base
-    return base
+  const go = (path) => {
+    setDrawer(false)
+    navigate(path)
   }
 
-  const sync = async ({ silent = false } = {}) => {
+  const setSidebar = () => {
+    setCollapsed((v) => {
+      const next = !v
+      try {
+        localStorage.setItem('override-lab:sidebar', next ? 'collapsed' : 'expanded')
+      } catch {
+        /* preference simply will not persist */
+      }
+      return next
+    })
+  }
+
+  const contextSku = sku || storedEvent.sku || null
+  const contextViews = new Set(['competition', 'scouting', 'alliance'])
+
+  const currentTeam =
+    view === 'counter'
+      ? route.q.get('own') || active?.number
+      : view === 'team' || view === 'competition'
+        ? param || active?.number
+        : active?.number
+
+  useEffect(() => {
+    if (!sku) return
+    try {
+      localStorage.setItem('override-lab:event', sku)
+      if (event?.name) localStorage.setItem('override-lab:event-name', event.name)
+      // Other destinations (Scouting, Alliance, Competition Day) read this context.
+      setStoredEvent((prev) =>
+        prev.sku === sku && (!event?.name || prev.name === event.name)
+          ? prev
+          : { sku, name: event?.name || prev.name || null }
+      )
+    } catch {
+      /* storage may be unavailable */
+    }
+  }, [sku, event?.name])
+
+  const sync = async () => {
     if (!sku || syncBusy.current) return
     syncBusy.current = true
     setSyncing(true)
     setSyncError(null)
     try {
       await jpost(endpoints.refresh(sku), { team: currentTeam || undefined })
-      setSyncedAt(new Date())
       setDataKey((k) => k + 1)
     } catch (e) {
-      if (!silent) setSyncError(e.message)
+      setSyncError(e.message)
     } finally {
       syncBusy.current = false
       setSyncing(false)
     }
   }
 
+  // A tournament opened from the list becomes a temporary server session; the notice must
+  // appear at once, not only after a reload.
   useEffect(() => {
-    if (!sku || !event) return
-    const start = Date.parse(event.start_date || '')
-    const end = Date.parse(event.end_date || event.start_date || '')
-    const now = Date.now()
-    const running = !Number.isNaN(start) && now >= start - 86400000 && (Number.isNaN(end) || now <= end + 2 * 86400000)
-    if (!running) return
-    const id = setInterval(() => sync({ silent: true }), 4 * 60 * 1000)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sku, event?.start_date, event?.end_date])
+    const onLive = (e) => setLive(e.detail || null)
+    window.addEventListener('override-lab:live', onLive)
+    return () => window.removeEventListener('override-lab:live', onLive)
+  }, [])
+
+  // Closing or hiding the tab without saving discards the temporary copy, as before.
+  useEffect(() => {
+    const onHide = () => {
+      let pending = null
+      try {
+        pending = sessionStorage.getItem('vex-live')
+      } catch {
+        return
+      }
+      if (!pending) return
+      navigator.sendBeacon('/api/session/discard', new Blob([JSON.stringify({ sku: pending })], { type: 'application/json' }))
+    }
+    window.addEventListener('pagehide', onHide)
+    return () => window.removeEventListener('pagehide', onHide)
+  }, [])
 
   useEffect(() => {
     api('/api/session')
@@ -196,26 +376,15 @@ function Shell() {
       .catch(() => {})
   }, [live])
 
-  useEffect(() => {
-    const onHide = () => {
-      const pending = sessionStorage.getItem('vex-live')
-      if (!pending) return
-      navigator.sendBeacon('/api/session/discard', new Blob([JSON.stringify({ sku: pending })], { type: 'application/json' }))
-    }
-    window.addEventListener('pagehide', onHide)
-    return () => window.removeEventListener('pagehide', onHide)
-  }, [])
-
   const saveLive = async () => {
     if (!live) return
     try {
       await jpost('/api/session/save', { sku: live })
     } catch (e) {
-      console.error(e)
+      setSyncError(e.message)
     }
     sessionStorage.removeItem('vex-live')
     setLive(null)
-    reloadEvents()
   }
 
   const discardLive = async () => {
@@ -223,186 +392,209 @@ function Shell() {
     try {
       await jpost('/api/session/discard', { sku: live })
     } catch (e) {
-      console.error(e)
+      setSyncError(e.message)
     }
     sessionStorage.removeItem('vex-live')
     setLive(null)
-    reloadEvents()
-    navigate('start')
+    go('tournaments')
   }
 
-  // The public page is the front door, whether or not a team is already saved.
   if (welcome || !hasTeams) {
     return (
-      <Landing
-        onTeam={(record) => {
-          addTeam(record)
-          navigate('dashboard')
-        }}
-      />
+      <>
+        <Landing
+          onTeam={(record) => {
+            addTeam(record)
+            navigate('dashboard')
+          }}
+        />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} events={events} />
+      </>
     )
   }
 
-  const eventView = MODEL_VIEWS.has(view)
-  const noEventNeeded = !eventView
+  const eventView = EVENT_VIEWS.has(view)
+  const showEventPicker = eventView || contextViews.has(view)
+  const primary = NAV.find((n) => n.id === view)
+  const title = eventView ? event?.name || TITLES[view] || 'Tournament' : TITLES[view] || 'Override Lab'
+  const crumb = eventView ? 'Tournaments' : primary?.group === 'Competition' ? 'Competition' : primary?.group || ''
 
   return (
-    <div className="app">
+    <div className={`app ${collapsed ? 'rail' : ''} ${drawer ? 'drawer-open' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">V5</div>
-          <div>
-            <div className="brand-name">Override Lab</div>
-            <div className="brand-sub">V5RC 2026–27</div>
-          </div>
+
+      {drawer && <button type="button" className="drawer-scrim" aria-label="Close navigation" onClick={() => setDrawer(false)} />}
+
+      <aside className="sidebar" aria-label="Primary">
+        <div className="sidebar-top">
+          <a className="brand" href="#/dashboard" onClick={(e) => { e.preventDefault(); go('dashboard') }}>
+            <span className="brand-mark" aria-hidden="true">OL</span>
+            <span className="brand-text">
+              <span className="brand-name">Override Lab</span>
+              <span className="brand-sub">V5RC 2026–27</span>
+            </span>
+          </a>
+          <button type="button" className="icon-btn rail-toggle" onClick={setSidebar} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            <Icon name="panel" size={17} />
+          </button>
         </div>
 
-        <TeamSwitcher />
+        <TeamSwitcher className={collapsed ? 'is-collapsed' : ''} />
 
-        {events.length > 0 && (
-        <div className="event-pick">
-          <div className="nav-label">Archived event</div>
-          {eventsLoading && <div className="dim small">loading…</div>}
-          {(
-            <select value={sku || ''} onChange={(e) => go(pathFor(view, e.target.value))}>
-              {events.map((e) => (
-                <option key={e.sku} value={e.sku}>
-                  {e.name} ({e.season || e.sku})
-                </option>
-              ))}
-            </select>
-          )}
-          {event && (
-            <div className="tiny dim" style={{ lineHeight: 1.45 }}>
-              {event.transient ? (
-                <>
-                  unsaved session
-                  <br />
-                  {event.match_count ?? 0} matches loaded
-                  <br />
-                  save it or it is deleted
-                </>
-              ) : (
-                <>
-                  {event.program} · {event.season || 'season n/a'}
-                  <br />
-                  {event.team_count} teams · {event.match_count} matches
-                  <br />
-                  {event.video_count} video{event.video_count === 1 ? '' : 's'} linked
-                </>
-              )}
-            </div>
-          )}
-        </div>
-        )}
-
-        <nav className="nav" aria-label="Main">
-          <NavSection label="Workspace" ids={['dashboard', 'tournaments', 'field', 'testing']} view={view} pathFor={pathFor} go={go} collapsible={false} />
-          <NavSection label="Strategy tools" ids={['scouting', 'alliance', 'autonomous', 'rules']} view={view} pathFor={pathFor} go={go} defaultOpen />
-          <NavSection
-            label="Tournament review"
-            ids={['start', 'overview', 'matches', 'stream', 'onsite', 'sim', 'simulator', 'team', 'counter', 'meta', 'data']}
-            view={view}
-            pathFor={pathFor}
-            go={go}
-          />
-          <NavSection label="Account" ids={['teams', 'settings']} view={view} pathFor={pathFor} go={go} />
+        <nav className="nav" aria-label="Main navigation">
+          {NAV_GROUPS.map((group) => {
+            const items = NAV.filter((n) => n.group === group)
+            if (!items.length) return null
+            return (
+              <div className="nav-group" key={group}>
+                <div className="nav-label">{group}</div>
+                {items.map((item) => (
+                  <NavLink key={item.id} item={item} active={view === item.id || (eventView && item.id === 'tournaments')} collapsed={collapsed} onClick={go} />
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
-        <div className="spacer" />
-        <ApiKey />
-        <div className="sidebar-foot">Model estimates, not an official VEX product.</div>
+        <div className="sidebar-bottom">
+          <NavLink item={NAV.find((n) => n.id === 'settings')} active={view === 'settings'} collapsed={collapsed} onClick={go} />
+          <div className="sidebar-foot">
+            Unofficial V5RC analysis · not affiliated with VEX or the REC Foundation.
+          </div>
+        </div>
       </aside>
 
       <div className="main">
         {live && (
           <div className="live-bar">
             <div>
-              <strong>Unsaved session</strong> · <span className="mono">{live}</span> — this event is temporary. Close the tab or
-              discard it and the data is deleted.
+              <strong>Unsaved session</strong> · <span className="mono">{live}</span> — this event is temporary until saved.
             </div>
             <div className="row">
               <Btn size="sm" variant="primary" onClick={saveLive}>Save to archive</Btn>
-              <Btn size="sm" variant="ghost" onClick={discardLive}>Discard now</Btn>
+              <Btn size="sm" variant="ghost" onClick={discardLive}>Discard</Btn>
             </div>
           </div>
         )}
 
         <header className="topbar">
+          <button type="button" className="icon-btn mobile-only" onClick={() => setDrawer(true)} aria-label="Open navigation">
+            <Icon name="menu" size={19} />
+          </button>
           <div className="topbar-title">
-            <h1>{titleFor(view)}</h1>
-            <div className="topbar-sub">
-              {event && eventView
-                ? event.transient
-                  ? `${event.name} · unsaved session · ${event.match_count ?? 0} matches`
-                  : `${event.name} · ${event.program} · ${event.season || ''} · ${event.start_date ? String(event.start_date).slice(0, 10) : ''}`
-                : active
-                  ? `${active.number}${active.name ? ` · ${active.name}` : ''} · ${active.seasonLabel}`
-                  : 'multi-team VEX V5RC Override analysis'}
+            <div className="crumbs">
+              <span>Override Lab</span>
+              {crumb ? <><span aria-hidden="true">/</span><span>{crumb}</span></> : null}
             </div>
+            <h1>{title}</h1>
           </div>
+
           <div className="topbar-actions">
-            {!noEventNeeded && sku && (
-              <button
-                type="button"
-                className="theme-opt"
-                onClick={() => sync()}
-                disabled={syncing}
-                title={syncedAt ? `last synced ${syncedAt.toLocaleTimeString()}` : 'pull the latest matches from RobotEvents'}
+            <button type="button" className="search-trigger" onClick={() => setPalette(true)} aria-label="Search tools, teams and events">
+              <Icon name="search" size={16} />
+              <span>Search</span>
+              <kbd>⌘K</kbd>
+            </button>
+
+            {showEventPicker && (events.length > 0 || contextSku) && (
+              <select
+                className="event-select"
+                value={sku || contextSku || ''}
+                onChange={(e) => go(eventView ? `overview/${e.target.value}` : `${view}/${e.target.value}`)}
+                aria-label="Selected tournament"
+                title="Selected tournament"
               >
-                <span>{syncing ? '⟳ syncing…' : '⟳ sync'}</span>
+                <option value="">Choose event…</option>
+                {contextSku && !events.some((e) => e.sku === contextSku) && (
+                  <option value={contextSku}>{event?.name || contextSku}</option>
+                )}
+                {events.map((e) => (
+                  <option key={e.sku} value={e.sku}>{e.name}</option>
+                ))}
+              </select>
+            )}
+
+            {eventView && sku && (
+              <button type="button" className="icon-btn" onClick={sync} disabled={syncing} title="Pull the latest official matches">
+                <Icon name={syncing ? 'close' : 'arrow'} size={16} className={syncing ? 'spin' : ''} />
               </button>
             )}
-            {syncError && <span className="tiny bad">{syncError}</span>}
-            {active && <span className="top-pill">{active.number}</span>}
+            {syncError && <span className="tiny bad" title={syncError}>sync failed</span>}
+            <ThemeMenu />
           </div>
         </header>
 
-        <nav className="mobile-nav" aria-label="Primary">
-          {[
-            { id: 'dashboard', label: 'Home' },
-            { id: 'tournaments', label: 'Events' },
-            { id: 'field', label: 'Field' },
-            { id: 'testing', label: 'Testing' }
-          ].map((item) => (
-            <button key={item.id} type="button" className={view === item.id ? 'active' : ''} onClick={() => go(item.id)}>
-              <span aria-hidden="true">{ROUTES.find((r) => r.id === item.id)?.icon}</span>
-              {item.label}
-            </button>
-          ))}
-          <button type="button" onClick={() => go('teams')}>
-            <span aria-hidden="true">☰</span> More
-          </button>
-        </nav>
-
-        <main className="content" id="main-content" key={`${view}-${dataKey}`}>
+        <main className="content" id="main-content" key={`${view}-${sku || ''}-${dataKey}`}>
           {view === 'dashboard' && <Dashboard />}
-          {view === 'teams' && <MyTeams query={route.q} />}
-          {view === 'tournaments' && <Tournaments />}
-          {view === 'scouting' && <Scouting />}
-          {view === 'alliance' && <Alliance />}
+          {view === 'tournaments' && (
+            eventsLoading && !events.length ? <div className="skeleton-block" aria-busy="true">Loading tournaments…</div> : <Tournaments />
+          )}
+          {view === 'competition' && (
+            contextSku ? (
+              <Onsite sku={contextSku} team={currentTeam} navigate={go} />
+            ) : (
+              <Empty>
+                Choose a tournament to open Competition Day. <button type="button" className="link" onClick={() => go('tournaments')}>Browse tournaments</button>.
+              </Empty>
+            )
+          )}
+          {view === 'scouting' && <Scouting sku={contextSku} />}
+          {view === 'alliance' && <Alliance sku={contextSku} />}
           {view === 'field' && <Field query={route.q} />}
-          {view === 'autonomous' && <Autonomous />}
           {view === 'testing' && <Testing />}
           {view === 'rules' && <Rules />}
           {view === 'settings' && <Settings />}
-          {view === 'start' && <Start navigate={go} />}
-          {view === 'simulator' && <Simulator />}
-          {eventView && !sku && (
-            <Empty>No events in the archive yet — start with a competition name and a team ID.</Empty>
+
+          {eventView && (
+            <EventWorkspace view={view} event={event} sku={sku} go={go} query={(() => { const q = new URLSearchParams(); if (eventName) q.set('name', eventName); if (event?.start_date) q.set('start', event.start_date); return q.toString() })()}>
+              {!sku ? (
+                <Empty>
+                  No tournament selected. <button type="button" className="link" onClick={() => go('tournaments')}>Open a tournament</button> to see its review.
+                </Empty>
+              ) : (
+                <>
+                  {view === 'overview' && <Overview sku={sku} navigate={go} />}
+                  {view === 'matches' && <Matches sku={sku} navigate={go} matchKey={route.q.get('m')} />}
+                  {view === 'stream' && <Stream sku={sku} matchKey={route.q.get('m')} navigate={go} />}
+                  {view === 'rankings' && <EventTable sku={sku} mode="rankings" navigate={go} />}
+                  {view === 'skills' && <EventTable sku={sku} mode="skills" navigate={go} />}
+                  {view === 'eliminations' && <EventTable sku={sku} mode="eliminations" navigate={go} />}
+                  {view === 'team' && <TeamPage sku={sku} team={currentTeam} vs={route.q.get('vs')} navigate={go} />}
+                  {view === 'counter' && <CounterPage sku={sku} opp={param} own={currentTeam} navigate={go} />}
+                  {view === 'meta' && <MetaPage sku={sku} navigate={go} />}
+                </>
+              )}
+            </EventWorkspace>
           )}
-          {sku && view === 'onsite' && <Onsite sku={sku} team={currentTeam} navigate={go} />}
-          {sku && view === 'sim' && <Sim sku={sku} team={currentTeam} navigate={go} />}
-          {sku && view === 'overview' && <Overview sku={sku} navigate={go} />}
-          {sku && view === 'matches' && <Matches sku={sku} navigate={go} matchKey={route.q.get('m')} />}
-          {sku && view === 'stream' && <Stream sku={sku} matchKey={route.q.get('m')} navigate={go} />}
-          {sku && view === 'team' && <TeamPage sku={sku} team={currentTeam} vs={route.q.get('vs')} navigate={go} />}
-          {sku && view === 'counter' && <CounterPage sku={sku} opp={param} own={currentTeam} navigate={go} />}
-          {sku && view === 'meta' && <MetaPage sku={sku} navigate={go} />}
-          {sku && view === 'data' && <DataPage sku={sku} navigate={go} />}
         </main>
+
+        <nav className="mobile-bar" aria-label="Primary mobile navigation">
+          {[
+            { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+            { id: 'tournaments', label: 'Events', icon: 'trophy' },
+            { id: 'competition', label: 'Match day', icon: 'zap' },
+            { id: 'scouting', label: 'Scout', icon: 'clipboard' },
+            { id: 'alliance', label: 'Strategy', icon: 'users' }
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={view === item.id ? 'active' : ''}
+              aria-current={view === item.id ? 'page' : undefined}
+              onClick={() => go(item.id)}
+            >
+              <Icon name={item.icon} size={20} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+          <button type="button" onClick={() => setDrawer(true)}>
+            <Icon name="menu" size={20} />
+            <span>More</span>
+          </button>
+        </nav>
       </div>
+
+      <CommandPalette open={palette} onClose={() => setPalette(false)} events={events} />
     </div>
   )
 }

@@ -75,16 +75,22 @@ export default function Tournaments() {
         pick: event.sku || undefined
       })
       if (out.ambiguous) {
-        setError(`“${event.name}” matches several events. Open “Find a competition” to pick one.`)
+        setError(`“${event.name}” matches several events. Search all Override events to pick one.`)
         return
       }
       try {
         sessionStorage.setItem('vex-live', out.sku)
+        window.dispatchEvent(new CustomEvent('override-lab:live', { detail: out.sku }))
       } catch {
         /* ignore */
       }
-      if (out.teamFound) navigate(`team/${out.sku}/${encodeURIComponent(out.team)}`)
-      else navigate(out.rosterOnly ? `team/${out.sku}` : `overview/${out.sku}`)
+      try {
+        localStorage.setItem('override-lab:event', out.sku)
+        localStorage.setItem('override-lab:event-name', event.name || '')
+      } catch {
+        /* storage may be unavailable */
+      }
+      navigate(`overview/${out.sku}?name=${encodeURIComponent(event.name)}${event.start ? `&start=${encodeURIComponent(event.start)}` : ''}`)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -113,8 +119,8 @@ export default function Tournaments() {
         title="Tournament command centre"
         subtitle={`${active?.seasonLabel || '2026-27 Override'} · ${active?.number || 'no team'}`}
         right={
-          <Btn size="sm" variant="ghost" onClick={() => navigate('start')}>
-            Competition finder
+          <Btn size="sm" variant="ghost" onClick={() => { setTab('season'); document.querySelector('.toolbar input')?.focus() }}>
+            Search all events
           </Btn>
         }
       >

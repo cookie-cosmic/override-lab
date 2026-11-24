@@ -30,7 +30,7 @@ export default function TeamHistory({ team, history, loading, error, onRetry, su
       ) : (
         <>
           <div className="grid g4">
-            <Stat label="Record" value={`${h.wins}–${h.losses}${h.ties ? `–${h.ties}` : ''}`} sub={`${h.matches} matches · ${pct(h.winRate)} win rate`} />
+            <Stat label="Record" value={`${h.wins}–${h.losses}${h.ties ? `–${h.ties}` : ''}`} sub={`${h.matches} matches · ${pct(h.winRate)} adjusted win rate`} />
             <Stat label="Avg alliance score" value={fmt(h.avgScore)} sub={`floor ${fmt(h.floor)} · ceiling ${fmt(h.ceiling)}`} />
             <Stat label="Avg margin" value={h.avgMargin > 0 ? `+${fmt(h.avgMargin)}` : fmt(h.avgMargin)} sub={`opponents average ${fmt(h.avgOpp)}`} />
             <Stat label="Events played" value={h.events?.length ?? 0} sub={h.lastPlayed ? `last match ${short(h.lastPlayed)}` : '—'} />
@@ -75,8 +75,8 @@ export default function TeamHistory({ team, history, loading, error, onRetry, su
           <div style={{ marginTop: 10 }}>
             <Note>
               Aggregated from {h.matches} scored matches at {h.events?.length ?? 0} events
-              {h.source?.fetchedAt ? ` · refreshed ${dateTime(h.source.fetchedAt)}` : ''}. Opponent strength is not modelled across
-              events, so treat this as form rather than a rating.
+              {h.source?.fetchedAt ? ` · refreshed ${dateTime(h.source.fetchedAt)}` : ''}. Adjusted win rate counts a tie as half a
+              win. Opponent strength is not modelled across events, so treat this as form rather than a rating.
             </Note>
           </div>
         </>

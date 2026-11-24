@@ -1,5 +1,6 @@
 import React from 'react'
 import TeamLookup from '../components/TeamLookup.jsx'
+import Icon from '../components/Icons.jsx'
 import { useTeam } from '../team/TeamContext.jsx'
 import { navigate } from '../router.js'
 import { THEMES, useTheme } from '../theme.js'
@@ -7,39 +8,39 @@ import { Btn } from '../components/ui.jsx'
 
 const FEATURES = [
   {
-    icon: '◎',
-    title: 'Tournament command centre',
-    text: 'Real 2026–27 results, rankings, qualification record, eliminations and skills for the team you follow.'
+    icon: 'trophy',
+    title: 'Tournament Intelligence',
+    text: 'Official results, rankings, skills, eliminations and match history for the team you follow.'
   },
   {
-    icon: '⌖',
-    title: 'Scouting workspace',
-    text: 'Record intake, pin handling, toggle control and cycle times — per team, event and scout.'
+    icon: 'zap',
+    title: 'Competition Day',
+    text: 'Your next match, alliance partner, opponents and current standing — built for standing at the field.'
   },
   {
-    icon: '⇄',
-    title: 'Alliance analysis',
-    text: 'Explainable compatibility, role division and 2v2 estimates built from scored matches, not guesses.'
+    icon: 'clipboard',
+    title: 'Match Scouting',
+    text: 'Record what you actually saw, then turn observations into team profiles and opponent counters.'
   },
   {
-    icon: '▩',
-    title: 'Override field simulator',
-    text: 'Place pins and cups, set toggles, park robots and see both alliance scores update with the manual rules.'
+    icon: 'users',
+    title: 'Alliance Strategy',
+    text: 'Partner fit, role division and 2v2 estimates from scored matches, with the method shown.'
   },
   {
-    icon: '⟜',
-    title: 'Autonomous planner',
-    text: 'Lay out waypoints and actions on the field, estimate the 15-second window and check AWP requirements.'
+    icon: 'grid',
+    title: 'Field Simulator',
+    text: 'Place pins and cups, set toggles, park robots and score any Override end state with the manual rules.'
   },
   {
-    icon: '◍',
-    title: 'Robot testing log',
-    text: 'Log trials, compare configurations and watch cycle time and reliability across sessions.'
+    icon: 'wrench',
+    title: 'Robot Testing',
+    text: 'Log practice trials, compare robot versions and track cycle time and reliability over time.'
   },
   {
-    icon: '¶',
+    icon: 'book',
     title: 'Rules & Q&A',
-    text: 'Search the scoring definitions and official sources without inventing referee rulings.'
+    text: 'Search scoring definitions, the manual and official Q&A without inventing referee rulings.'
   }
 ]
 
@@ -48,6 +49,50 @@ const STEPS = [
   ['02', 'Confirm the official record', 'Name, organisation, location and this season’s events come from RobotEvents, not from a guess.'],
   ['03', 'Work in your own context', 'Every tool follows the active team. Save several teams and switch without losing work.']
 ]
+
+/** A labelled illustration of the real dashboard, never passed off as live results. */
+function PreviewCard() {
+  return (
+    <div className="preview-wrap" aria-label="Illustrative dashboard preview">
+      <div className="preview-card">
+        <div className="preview-top">
+          <div className="preview-id">
+            <span className="preview-mark">D</span>
+            <div>
+              <strong>75019D · Paradigm</strong>
+              <span className="tiny dim">Coppell High School · Texas</span>
+            </div>
+          </div>
+          <span className="preview-tag">DEMO</span>
+        </div>
+
+        <div className="preview-stats">
+          <div><span>Record</span><strong>4–3–1</strong></div>
+          <div><span>Avg alliance</span><strong>38.5</strong></div>
+          <div><span>Adj. win rate</span><strong>56%</strong></div>
+        </div>
+
+        <div className="preview-chart">
+          {[34, 48, 22, 61, 40, 54, 30, 47].map((h, i) => (
+            <span key={i} style={{ height: `${h + 18}%` }} className={i === 6 ? 'loss' : 'win'} />
+          ))}
+        </div>
+
+        <div className="preview-next">
+          <span className="tiny dim">Next registered event</span>
+          <strong>A Very Vex-mas Tournament</strong>
+          <span className="tiny dim">Dec 18, 2026 · Blended</span>
+        </div>
+
+        <div className="preview-foot">
+          <Icon name="clipboard" size={13} /> Scouting coverage: 6 opponents · <Icon name="wrench" size={13} /> 4 test sessions
+        </div>
+      </div>
+      <div className="preview-glow" aria-hidden="true" />
+      <p className="preview-note">Illustration with sample values · your dashboard uses official data for your team</p>
+    </div>
+  )
+}
 
 export default function Landing({ onTeam }) {
   const { hasTeams, teams, active } = useTeam()
@@ -59,7 +104,7 @@ export default function Landing({ onTeam }) {
     <div className="landing">
       <header className="landing-head">
         <a className="landing-brand" href="#/welcome" onClick={(e) => { e.preventDefault(); navigate('welcome') }}>
-          <span className="brand-mark">V5</span>
+          <span className="brand-mark">OL</span>
           <span>
             <strong>Override Lab</strong>
             <span className="dim"> · VEX V5RC 2026–27</span>
@@ -87,7 +132,8 @@ export default function Landing({ onTeam }) {
                 title={`${t.label} theme`}
                 onClick={() => setTheme(t.id)}
               >
-                <span className={`swatch ${t.id}`} />
+                <Icon name={t.icon} size={14} />
+                <span className="theme-label">{t.label}</span>
               </button>
             ))}
           </div>
@@ -96,17 +142,13 @@ export default function Landing({ onTeam }) {
 
       <section className="hero">
         <div className="hero-copy">
-          <span className="eyebrow">VEX V5 Robotics Competition · Override</span>
-          <h1>OVERRIDE LAB</h1>
-          <p className="hero-sub">Your Team. Your Strategy. Your Competitive Edge.</p>
-          <p className="hero-desc">
-            Analyze tournaments, scout opponents, predict alliances, simulate Override strategies, and take your VEX
-            V5RC team to the next level.
+          <span className="eyebrow">Override Lab · VEX V5 Robotics Competition · Override</span>
+          <h1>Compete smarter. Build your advantage.</h1>
+          <p className="hero-sub">
+            Tournament intelligence, scouting, alliance strategy and robot development tools built for your VEX V5RC
+            team.
           </p>
-          <TeamLookup
-            cta="Launch my dashboard →"
-            onConfirmed={onTeam}
-          />
+          <TeamLookup cta="Find my team →" onConfirmed={onTeam} />
           {hasTeams && (
             <div className="hero-return">
               Returning?{' '}
@@ -115,59 +157,20 @@ export default function Landing({ onTeam }) {
               </button>
             </div>
           )}
-          <div className="hero-facts">
-            <span><strong>9</strong> goals</span>
-            <span><strong>4</strong> toggles</span>
-            <span><strong>15s</strong> autonomous</span>
-            <span><strong>1:45</strong> driver</span>
-            <span><strong>12</strong> auto bonus</span>
-          </div>
         </div>
 
-        <div className="hero-visual" aria-hidden="true">
-          <div className="hv-card">
-            <div className="hv-head">
-              <span className="hv-dot red" /> <span className="hv-dot blue" /> <span className="dim tiny">match preview</span>
-            </div>
-            <div className="hv-score">
-              <span className="red">86</span>
-              <span className="dim">–</span>
-              <span className="blue">79</span>
-            </div>
-            <div className="hv-bars">
-              {[62, 78, 54, 88, 70, 94, 66, 81].map((h, i) => (
-                <span key={i} style={{ height: `${h}%` }} className={i % 2 ? 'blue' : 'red'} />
-              ))}
-            </div>
-            <div className="hv-foot tiny dim">Illustrative index · not live data</div>
-          </div>
-          <svg className="hv-field" viewBox="0 0 220 220" role="img" aria-label="Stylised Override field">
-            <rect x="2" y="2" width="216" height="216" rx="10" className="field-bg" />
-            <line x1="2" y1="2" x2="218" y2="218" className="field-line" />
-            <line x1="218" y1="2" x2="2" y2="218" className="field-line" />
-            <circle cx="110" cy="110" r="34" className="field-mid" />
-            <circle cx="110" cy="110" r="9" className="goal tall" />
-            <circle cx="56" cy="72" r="8" className="goal red-g" />
-            <circle cx="72" cy="56" r="8" className="goal red-g" />
-            <circle cx="164" cy="148" r="8" className="goal blue-g" />
-            <circle cx="148" cy="164" r="8" className="goal blue-g" />
-            <circle cx="56" cy="56" r="6" className="goal n" />
-            <circle cx="164" cy="164" r="6" className="goal n" />
-            <circle cx="164" cy="56" r="6" className="goal n" />
-            <circle cx="56" cy="164" r="6" className="goal n" />
-          </svg>
-        </div>
+        <PreviewCard />
       </section>
 
       <section className="landing-section" id="welcome-features">
         <div className="section-head">
-          <h2>Seven tools, one team context</h2>
-          <p>Everything below follows the team you select. Nothing is hardcoded to a single program.</p>
+          <h2>Your Competition Toolkit</h2>
+          <p>Every tool automatically adapts to your VEX team.</p>
         </div>
         <div className="feature-grid">
           {FEATURES.map((f) => (
             <article className="feature" key={f.title}>
-              <span className="feature-icon" aria-hidden="true">{f.icon}</span>
+              <span className="feature-icon" aria-hidden="true"><Icon name={f.icon} size={18} /></span>
               <h3>{f.title}</h3>
               <p>{f.text}</p>
             </article>
@@ -202,12 +205,10 @@ export default function Landing({ onTeam }) {
           <p>One number, every tool. Add more teams later and switch between them at any time.</p>
         </div>
         {hasTeams ? (
-          <Btn variant="primary" onClick={open}>
-            Open dashboard
-          </Btn>
+          <Btn variant="primary" onClick={open}>Open dashboard</Btn>
         ) : (
           <Btn variant="primary" onClick={() => document.querySelector('.hero .lookup-bar input')?.focus()}>
-            Enter a team number
+            Find my team
           </Btn>
         )}
       </section>

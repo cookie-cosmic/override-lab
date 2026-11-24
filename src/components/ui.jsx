@@ -15,9 +15,9 @@ export function Card({ title, subtitle, right, children, flush = false, classNam
   )
 }
 
-export function Stat({ label, value, sub, tone }) {
+export function Stat({ label, value, sub, tone, title }) {
   return (
-    <div className="stat">
+    <div className="stat" title={title}>
       <div className="l">{label}</div>
       <div className="v" style={tone ? { color: tone } : undefined}>
         {value}

@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useTeam } from '../team/TeamContext.jsx'
 import { useLookupHistory } from '../team/data.js'
 import { useTeamStore } from '../team/TeamContext.jsx'
-import { Badge, Btn, Card, Empty, Note, Stat, Table } from '../components/ui.jsx'
+import { Badge, Btn, Card, Empty, Note, Stat, Table, Tabs } from '../components/ui.jsx'
+import Icon from '../components/Icons.jsx'
 import { navigate } from '../router.js'
 import { fmt, pct } from '../api.js'
 
@@ -112,14 +113,14 @@ function TeamInput({ label, value, onChange, onLookup, profile, loading, error }
       {error && <span className="tiny bad">{error}</span>}
       {profile && (
         <span className="tiny dim">
-          {profile.matches ? `${profile.matches} matches · ${fmt(profile.avgScore)} avg · ${pct(profile.winRate)} win` : 'no scored matches this season'}
+          {profile.matches ? `${profile.matches} matches · ${fmt(profile.avgScore)} avg · ${pct(profile.winRate)} adjusted win rate` : 'no scored matches this season'}
         </span>
       )}
     </div>
   )
 }
 
-export default function Alliance() {
+export default function Alliance({ sku }) {
   const { active } = useTeam()
   const { records, loading, errors, load } = useLookupHistory()
   const { value: saved, save: saveSaved } = useTeamStore('alliance-scenarios', { items: [] })
@@ -129,6 +130,10 @@ export default function Alliance() {
   const [name, setName] = useState('')
   const [result, setResult] = useState(null)
   const [runError, setRunError] = useState(null)
+  const [tab, setTab] = useState('fit')
+  const { value: board, save: saveBoard } = useTeamStore('selection-board', { items: [] })
+  const [candidate, setCandidate] = useState('')
+  const [candidateNote, setCandidateNote] = useState('')
 
   useEffect(() => {
     if (active?.number) load(active.number)
@@ -186,7 +191,7 @@ export default function Alliance() {
 
   return (
     <div>
-      <Card title="Alliance analysis" subtitle={`${active.number} is pre-filled as your alliance participant`}>
+      <Card title="Alliance Strategy" subtitle={`${active.number} is pre-filled as your alliance participant`}>
         <div className="alliance-inputs">
           <div className="alliance-self">
             <span className="tiny dim">Your team</span>
@@ -210,14 +215,43 @@ export default function Alliance() {
           <TeamInput label="Opponent 2" value={opp2} onChange={setOpp2} onLookup={(v) => load(v)} profile={d} loading={loading[opp2]} error={errors[opp2]} />
         </div>
 
-        <div className="row" style={{ marginTop: 10 }}>
-          <Btn variant="primary" onClick={run} disabled={!partner}>Run 2v2 estimate</Btn>
-          <span className="tiny dim">20,000 draws · normal approximation · see method below</span>
-        </div>
-        {runError && <Note tone="warn">{runError}</Note>}
       </Card>
 
-      {a && b && (
+      <Tabs
+        tabs={[
+          { id: 'fit', label: 'Compatibility' },
+          { id: 'predict', label: 'Match predictions' },
+          { id: 'board', label: 'Selection board', count: board.items?.length },
+          { id: 'method', label: 'Model & method' }
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
+
+      {tab === 'predict' && (
+        <Card title="2v2 match prediction" subtitle="red alliance versus blue alliance, from recorded scores">
+          <div className="row" style={{ marginBottom: 8 }}>
+            <Btn variant="primary" onClick={run} disabled={!partner}>Run 2v2 estimate</Btn>
+            <span className="tiny dim">20,000 draws · normal approximation · see Model &amp; method</span>
+          </div>
+          <p className="tiny dim">
+            Red: {active.number}{partner ? ` + ${partner}` : ' + partner'} · Blue: {[opp1, opp2].filter(Boolean).join(' + ') || 'choose opponents above'}
+          </p>
+          {runError && <Note tone="warn">{runError}</Note>}
+          {!result && !runError && <p className="dim small">Load a partner and at least one opponent, then run the estimate. No prediction is produced when a team has no scored matches.</p>}
+        </Card>
+      )}
+
+      {tab === 'fit' && (!a || !b) && (
+        <Card title="Partner compatibility" subtitle="load two teams to compare them">
+          <Empty>
+            Enter a partner above and press Load. The active team is already filled in; nothing is estimated until both
+            teams have a public record.
+          </Empty>
+        </Card>
+      )}
+
+      {tab === 'fit' && a && b && (
         <Card title={`Compatibility · ${a.team} + ${b.team}`} subtitle="each component is shown, not hidden in one number">
           {!fit ? (
             <p className="dim small">Not enough shared signals to score this pair yet.</p>
@@ -275,7 +309,7 @@ export default function Alliance() {
         </Card>
       )}
 
-      {result && (
+      {tab === 'predict' && result && (
         <Card title="2v2 estimate" subtitle={`${result.red.map((t) => t.team).join(' + ')} vs ${result.blue.map((t) => t.team).join(' + ')}`}>
           <div className="stat-row">
             <Stat label="Red win" value={pct(result.out.redWin, 1)} sub={`95% CI ${pct(result.out.ci[0], 1)}–${pct(result.out.ci[1], 1)}`} />
@@ -302,7 +336,7 @@ export default function Alliance() {
         </Card>
       )}
 
-      <Card title="Saved alliance scenarios" subtitle={`${active.number} only`}>
+      {tab === 'predict' && <Card title="Saved alliance scenarios" subtitle={`${active.number} only`}>
         {!saved.items.length ? (
           <p className="dim small">Nothing saved yet. Run an estimate and keep it to compare partners later.</p>
         ) : (
@@ -323,9 +357,76 @@ export default function Alliance() {
             ))}
           </Table>
         )}
-      </Card>
+      </Card>}
 
-      <Card title="Method">
+      {tab === 'board' && (
+        <Card title="Selection board" subtitle="shortlist saved in this browser for the active team">
+          <div className="form-grid">
+            <label>
+              <span>Candidate team</span>
+              <input value={candidate} onChange={(e) => setCandidate(e.target.value.toUpperCase())} placeholder="e.g. 1234A" maxLength={8} />
+            </label>
+            <label>
+              <span>Role or note</span>
+              <input value={candidateNote} onChange={(e) => setCandidateNote(e.target.value)} placeholder="scoring anchor, toggle…" maxLength={60} />
+            </label>
+          </div>
+          <div className="row">
+            <Btn
+              size="sm"
+              variant="primary"
+              disabled={!/^[0-9]{1,5}[A-Z]?$/.test(candidate.trim())}
+              onClick={() => {
+                saveBoard((prev) => ({
+                  items: [
+                    ...(prev.items || []),
+                    { id: `${Date.now()}`, team: candidate.trim(), note: candidateNote.trim() || null, available: true, order: (prev.items || []).length }
+                  ]
+                }))
+                setCandidate('')
+                setCandidateNote('')
+              }}
+            >
+              <Icon name="plus" size={14} /> Add candidate
+            </Btn>
+            <span className="tiny dim">Reorder with the arrows. Marking a team unavailable keeps the note.</span>
+          </div>
+          {!(board.items || []).length ? (
+            <Empty>No candidates shortlisted yet. Add teams as you scout them.</Empty>
+          ) : (
+            <Table head={['#', 'Team', 'Note', 'Status', '']}>
+              {(board.items || []).map((item, i) => (
+                <tr key={item.id} className={item.available ? '' : 'dim'}>
+                  <td className="mono">{i + 1}</td>
+                  <td className="mono">{item.team}</td>
+                  <td className="small">{item.note || '—'}</td>
+                  <td><Badge tone={item.available ? 'good' : 'warn'}>{item.available ? 'available' : 'unavailable'}</Badge></td>
+                  <td>
+                    <div className="row" style={{ gap: 4 }}>
+                      <Btn size="sm" variant="ghost" aria-label={`Move ${item.team} up`} disabled={i === 0} onClick={() => saveBoard((prev) => {
+                        const list = [...prev.items]
+                        ;[list[i - 1], list[i]] = [list[i], list[i - 1]]
+                        return { items: list }
+                      })}>↑</Btn>
+                      <Btn size="sm" variant="ghost" aria-label={`Move ${item.team} down`} disabled={i === (board.items || []).length - 1} onClick={() => saveBoard((prev) => {
+                        const list = [...prev.items]
+                        ;[list[i + 1], list[i]] = [list[i], list[i + 1]]
+                        return { items: list }
+                      })}>↓</Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => saveBoard((prev) => ({ items: prev.items.map((x) => (x.id === item.id ? { ...x, available: !x.available } : x)) }))}>
+                        {item.available ? 'Mark unavailable' : 'Mark available'}
+                      </Btn>
+                      <Btn size="sm" variant="ghost" onClick={() => saveBoard((prev) => ({ items: prev.items.filter((x) => x.id !== item.id) }))}>Remove</Btn>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </Card>
+      )}
+
+      {tab === 'method' && <Card title="Method">
         <p className="small dim">
           Each team&apos;s season average and standard deviation come from its scored qualification matches. The model
           draws one score per team, adds the two alliance draws, and counts wins over 20,000 simulated matches. The 95%
@@ -333,7 +434,30 @@ export default function Alliance() {
           scouting information are not in the model; a team with fewer than three matches contributes a distribution that
           is little more than a guess, which the confidence note above states.
         </p>
-      </Card>
+        {sku ? (
+          <p className="small">
+            <button type="button" className="link" onClick={() => navigate(`meta/${sku}`)}>Open the advanced event model for {sku} →</button>
+          </p>
+        ) : null}
+        <div className="method-grid">
+          <div>
+            <h4>What the model uses</h4>
+            <p className="small dim">Each team&apos;s season average and standard deviation from scored qualification matches, drawn once per simulated match.</p>
+          </div>
+          <div>
+            <h4>What it cannot know</h4>
+            <p className="small dim">Robot interactions, match-to-match correlation, scouting information and autonomous overlap are not in the model.</p>
+          </div>
+          <div>
+            <h4>Confidence</h4>
+            <p className="small dim">The 95% interval is simulation uncertainty only. Teams with fewer than three matches contribute little more than a guess.</p>
+          </div>
+          <div>
+            <h4>Alliance scores, not robots</h4>
+            <p className="small dim">Scores are alliance totals. Two robots do not literally add their solo averages, which is why the estimate is labelled.</p>
+          </div>
+        </div>
+      </Card>}
     </div>
   )
 }

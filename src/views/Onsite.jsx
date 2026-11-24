@@ -22,7 +22,7 @@ const rememberTeam = (team) => {
 }
 
 /**
- * Onsite view: the same model as the post-tournament screens, read standing in the pit.
+ * Competition Day: the same model as the post-tournament screens, read standing in the pit.
  *
  * One card per match, in scheduled order, and inside each card the two alliances stay apart:
  * your side on the left, theirs on the right, with every counter attached to the opponent it
@@ -50,14 +50,14 @@ export default function Onsite({ sku, team, navigate }) {
     return [...new Set(power.map((t) => t.team))].sort()
   }, [summary])
 
-  if (!sku) return <Empty>Load a competition first — onsite planning needs an event in the archive or an unsaved session.</Empty>
+  if (!sku) return <Empty>Load a competition first — Competition Day needs an event in the archive or an unsaved session.</Empty>
 
   const load = () => {
     const next = draft.trim().toUpperCase()
     if (!next) return
     rememberTeam(next)
     setOpen({})
-    navigate(`onsite/${sku}/${encodeURIComponent(next)}`)
+    navigate(`competition/${sku}/${encodeURIComponent(next)}`)
   }
 
   const matches = data?.matches || []
