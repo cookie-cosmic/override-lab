@@ -128,6 +128,15 @@ function dbReady() {
     used_at TEXT,
     ip_hash TEXT
   )`)
+  // Owner credentials written by `npm run owner:set`, for a machine where the host's secret
+  // store never reaches the server process. The entry code is stored as a scrypt hash only.
+  run(`CREATE TABLE IF NOT EXISTS owner_credential (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,
+    code_salt TEXT NOT NULL,
+    totp_secret TEXT,
+    updated_at TEXT NOT NULL
+  )`)
   run(`CREATE TABLE IF NOT EXISTS notify_subs (
     id TEXT PRIMARY KEY,
     team_number TEXT NOT NULL,
@@ -768,10 +777,86 @@ export async function teamLogin({ team, pin, label = null, ip = null, access = n
   }
 }
 
-/** The entry code alone enables the admin entry field; TOTP adds the second factor. */
-export const ownerEntryConfigured = () => Boolean(process.env.OWNER_ENTRY_CODE)
-export const ownerMfaConfigured = () => Boolean(process.env.OWNER_TOTP_SECRET)
+// ---- owner credential ----------------------------------------------------
+//
+// Two sources, environment first:
+//   * OWNER_ENTRY_CODE / OWNER_TOTP_SECRET from the host — the documented deployment path, and
+//     what a hosting dashboard's secret store feeds where it is plumbed into the process.
+//   * A row written by `npm run owner:set`, for a machine where host secrets never arrive (a
+//     preview server started from a shell, for example).
+//
+// Either way the entry code alone only starts verification when an authenticator is configured.
+// The entry code enables the admin entry field; TOTP adds the second factor.
+
+function storedOwnerCredential() {
+  return get("SELECT * FROM owner_credential WHERE id = 'owner'") || null
+}
+
+/** Which credential source is active. Booleans only: never the values. */
+export function ownerStatus() {
+  const stored = storedOwnerCredential()
+  const envCode = Boolean(process.env.OWNER_ENTRY_CODE)
+  return {
+    configured: envCode || Boolean(stored),
+    source: envCode ? 'environment' : stored ? 'server store' : null,
+    mfa: Boolean(process.env.OWNER_TOTP_SECRET) || Boolean(stored?.totp_secret)
+  }
+}
+
+export const ownerEntryConfigured = () => ownerStatus().configured
+export const ownerMfaConfigured = () => ownerStatus().mfa
 export const ownerConfigured = ownerEntryConfigured
+
+/** The authenticator secret in force, or null when no second factor is configured. */
+function ownerTotpSecret() {
+  return process.env.OWNER_TOTP_SECRET || storedOwnerCredential()?.totp_secret || null
+}
+
+// Owner codes are chosen by the owner and may contain lowercase letters and symbols, so they
+// are hashed exactly as typed — unlike chapter and team codes, which are normalised.
+function hashOwnerCode(code, salt = crypto.randomBytes(16).toString('hex')) {
+  return {
+    hash: crypto.scryptSync(String(code), salt, 32, { N: 16384, r: 8, p: 1 }).toString('hex'),
+    salt
+  }
+}
+
+function ownerCodeMatches(code, hash, salt) {
+  if (!hash || !salt || !code) return false
+  const candidate = crypto.scryptSync(String(code), salt, 32, { N: 16384, r: 8, p: 1 })
+  const expected = Buffer.from(hash, 'hex')
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected)
+}
+
+/**
+ * Stores an owner credential outside the environment. Called only by scripts/owner-set.js, which
+ * runs on the server host — there is deliberately no HTTP route for this, so no visitor can ever
+ * assign themselves the owner role.
+ */
+export function setOwnerCredential({ code, totpSecret = null }) {
+  const entry = String(code || '').trim()
+  if (entry.length < 6) throw new Error('the owner entry code must be at least 6 characters')
+  const { hash, salt } = hashOwnerCode(entry)
+  const existing = storedOwnerCredential()
+  const totp = String(totpSecret || '').replace(/\s+/g, '').toUpperCase() || existing?.totp_secret || null
+  run(
+    `INSERT INTO owner_credential(id, code_hash, code_salt, totp_secret, updated_at) VALUES('owner',?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET code_hash=excluded.code_hash, code_salt=excluded.code_salt,
+       totp_secret=excluded.totp_secret, updated_at=excluded.updated_at`,
+    hash,
+    salt,
+    totp,
+    nowIso()
+  )
+  audit({ actorKind: 'owner', action: 'access.owner.credential_set', detail: { source: 'server store', mfa: Boolean(totp) } })
+  return ownerStatus()
+}
+
+export function clearOwnerCredential() {
+  run("DELETE FROM owner_credential WHERE id = 'owner'")
+  audit({ actorKind: 'owner', action: 'access.owner.credential_cleared' })
+  return ownerStatus()
+}
 
 /**
  * Step one of owner sign-in: proves knowledge of the entry code.
@@ -792,12 +877,21 @@ export async function ownerBegin({ code, ip = null }) {
     audit({ action: 'access.rate_limited', detail: { kind: 'owner' }, ip })
     throw Object.assign(new Error('too many attempts — wait a few minutes and try again'), { status: 429 })
   }
-  const expected = String(process.env.OWNER_ENTRY_CODE).trim()
   const given = String(code || '').trim()
-  // Constant-time comparison over equal-length buffers.
-  const a = Buffer.from(sha256(given), 'hex')
-  const b = Buffer.from(sha256(expected), 'hex')
-  if (!crypto.timingSafeEqual(a, b)) {
+  // The host environment wins when it is set; the stored credential is the fallback. Both
+  // comparisons are constant-time and the answer never reveals which path was taken.
+  const envCode = process.env.OWNER_ENTRY_CODE
+  let accepted = false
+  if (envCode) {
+    const a = Buffer.from(sha256(given), 'hex')
+    const b = Buffer.from(sha256(String(envCode).trim()), 'hex')
+    accepted = crypto.timingSafeEqual(a, b)
+  }
+  if (!accepted) {
+    const stored = storedOwnerCredential()
+    if (stored) accepted = ownerCodeMatches(given, stored.code_hash, stored.code_salt)
+  }
+  if (!accepted) {
     noteAttempt(key, false)
     audit({ action: 'access.owner.entry_failed', ip })
     throw Object.assign(new Error('that access code was not recognised'), { status: 401 })
@@ -813,7 +907,8 @@ export async function ownerBegin({ code, ip = null }) {
       kind: 'owner',
       owner: true,
       mfa: false,
-      warning: 'No authenticator is configured for this deployment, so the entry code alone opened the admin panel. Set OWNER_TOTP_SECRET to require a second factor.'
+      warning:
+        'No authenticator is configured for this deployment, so the entry code alone opened the admin panel. Configure one (OWNER_TOTP_SECRET, or `npm run owner:set`) to require a second factor.'
     }
   }
 
@@ -908,7 +1003,9 @@ export async function ownerVerify({ challenge, code, label = null, ip = null }) 
   if (!row || row.used_at || Date.parse(row.expires_at) <= Date.now()) {
     throw Object.assign(new Error('that verification request expired — start again'), { status: 401 })
   }
-  if (!verifyTotp(process.env.OWNER_TOTP_SECRET, code)) {
+  const totpSecret = ownerTotpSecret()
+  if (!totpSecret) throw Object.assign(new Error('owner access is not configured on this deployment'), { status: 503 })
+  if (!verifyTotp(totpSecret, code)) {
     noteAttempt(key, false)
     audit({ action: 'access.owner.totp_failed', ip })
     throw Object.assign(new Error('that verification code is not valid'), { status: 401 })

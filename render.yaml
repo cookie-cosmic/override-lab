@@ -12,6 +12,14 @@ services:
       # Prompted for on first blueprint creation; never stored in the repo.
       - key: ROBOTEVENTS_TOKEN
         sync: false
+      # Owner console entry code. Set it in the Render dashboard for this service (sync: false
+      # keeps the value out of the repo); without it owner sign-in stays closed.
+      - key: OWNER_ENTRY_CODE
+        sync: false
+      # Optional authenticator secret for a second factor. Leave unset to sign in with the
+      # entry code alone, protected by the server-side attempt limit.
+      - key: OWNER_TOTP_SECRET
+        sync: false
       # Free instances have an ephemeral disk, so the SQLite archive lives in /tmp.
       - key: VEX_DATA_DIR
         value: /tmp/vex

@@ -7,11 +7,15 @@ import { fileURLToPath } from 'node:url'
 import { handleApi } from './routes.js'
 import { clearTransients, expireTransients } from './db.js'
 import { loadEnv } from './env.js'
+import { ownerStatus } from './access.js'
 
 // Loads ROBOTEVENTS_TOKEN from a local .env when present. Values are never logged or served.
 const envNames = loadEnv()
-// Boolean only: never the value. Makes a missing owner code obvious in the server log.
-console.log(`[access] owner entry ${process.env.OWNER_ENTRY_CODE ? 'configured' : 'not configured'}; authenticator ${process.env.OWNER_TOTP_SECRET ? 'configured' : 'not configured'}`)
+// Booleans and the source only, never the value. Makes a missing owner code obvious in the log.
+const owner = ownerStatus()
+console.log(
+  `[access] owner entry ${owner.configured ? `configured (${owner.source})` : 'not configured'}; authenticator ${owner.mfa ? 'configured' : 'not configured'}`
+)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
