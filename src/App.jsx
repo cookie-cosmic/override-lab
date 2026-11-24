@@ -16,6 +16,7 @@ import { ChapterLogin, TeamLogin, ChapterAdmin } from './views/AccessPages.jsx'
 import { Btn, Empty } from './components/ui.jsx'
 import Icon from './components/Icons.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
+import { BrandMark } from './components/Brand.jsx'
 import TeamSwitcher from './components/TeamSwitcher.jsx'
 import { TeamProvider, useTeam } from './team/TeamContext.jsx'
 import { AccessProvider, useAccess } from './access/AccessContext.jsx'
@@ -159,6 +160,10 @@ function Shell() {
   const [palette, setPalette] = useState(false)
   const [storedEvent, setStoredEvent] = useState(readStoredEvent)
   const boundTeam = useRef(null)
+  // The active-page indicator is one element that travels between destinations rather than a
+  // background that blinks on and off.
+  const navRef = useRef(null)
+  const [ink, setInk] = useState({ top: 0, height: 0, show: false })
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash())
@@ -234,6 +239,22 @@ function Shell() {
   // Which experience this device is in. Navigation, page chrome and available routes follow it.
   const mode = isOwner ? 'owner' : isTeam ? 'team' : isChapter ? 'chapter' : 'public'
 
+  useEffect(() => {
+    const nav = navRef.current
+    if (!nav) {
+      setInk((i) => (i.show ? { ...i, show: false } : i))
+      return
+    }
+    const activeLink = nav.querySelector('.nav-link.active')
+    if (!activeLink) {
+      setInk((i) => (i.show ? { ...i, show: false } : i))
+      return
+    }
+    const navBox = nav.getBoundingClientRect()
+    const linkBox = activeLink.getBoundingClientRect()
+    setInk({ top: linkBox.top - navBox.top, height: linkBox.height, show: true })
+  }, [view, mode, collapsed, isChapter, isOwner, route.q.toString()])
+
   const setSidebar = () => {
     setCollapsed((v) => {
       const next = !v
@@ -279,7 +300,7 @@ function Shell() {
         <PublicHeader view={view}>
           <ThemeMenu />
         </PublicHeader>
-        <main className="content" id="main-content">
+        <main className="content page-enter" id="main-content" key={view}>
           {view === 'home' && <PublicHome />}
           {view === 'teams' && <PublicTeams query={route.q} />}
           {view === 'competitions' && <PublicCompetitions />}
@@ -338,10 +359,10 @@ function Shell() {
       <aside className="sidebar" aria-label="Primary">
         <div className="sidebar-top">
           <a className="brand" href="#/home" onClick={(e) => { e.preventDefault(); go('home') }}>
-            <span className="brand-mark" aria-hidden="true">OL</span>
+            <BrandMark size={32} />
             <span className="brand-text">
               <span className="brand-name">Override Lab</span>
-              <span className="brand-sub">V5RC 2026–27</span>
+              <span className="brand-sub">Competition intelligence</span>
             </span>
           </a>
           <button type="button" className="icon-btn rail-toggle" onClick={setSidebar} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
@@ -351,7 +372,10 @@ function Shell() {
 
         {mode !== 'chapter' && <TeamSwitcher className={collapsed ? 'is-collapsed' : ''} />}
 
-        <nav className="nav" aria-label="Main navigation">
+        <nav className="nav" aria-label="Main navigation" ref={navRef}>
+          {ink.show && (
+            <span className="nav-indicator" aria-hidden="true" style={{ transform: `translateY(${ink.top}px)`, height: ink.height, opacity: 1 }} />
+          )}
           {mode === 'chapter' ? (
             <div className="nav-group">
               <div className="nav-label">Chapter</div>
@@ -443,7 +467,7 @@ function Shell() {
           </div>
         </header>
 
-        <main className="content" id="main-content">
+        <main className="content page-enter" id="main-content" key={view}>
           {view === 'home' && (isChapter && !isTeam ? <Chapter query={route.q} /> : <Home query={route.q} />)}
           {view === 'chapter-login' && <ChapterLogin />}
           {view === 'team-login' && <TeamLogin query={route.q} />}

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { jpost, endpoints, useApi, fmt, pct, sign, dateTime } from '../api.js'
 import { Card, Stat, Badge, Table, Loading, ErrorBox, TeamTag, Note, Empty, Btn, Field, Prose, Claims, KV } from '../components/ui.jsx'
-import { ProbMeter } from '../components/charts.jsx'
+import { ProbMeter, WinGauge } from '../components/charts.jsx'
 
 const SCOUT_FIELDS = [
   { key: 'archetype', label: 'Robot archetype', type: 'text', hint: 'fast cycler / hoarder / wall bot / support' },
@@ -253,6 +253,12 @@ export default function CounterPage({ sku, opp, own, navigate }) {
           <Card title="Win probability">
             {plan?.winProb != null ? (
               <>
+                <WinGauge
+                  value={plan.winProb}
+                  label="Baseline"
+                  note={`${pct(plan.winProb)} baseline · ${pct(plan.winProbWithPlan)} with the plan (${sign(plan.deltaP * 100, 1)}pp)`}
+                />
+                <div style={{ height: 12 }} />
                 <ProbMeter value={plan.winProb} label="Baseline" width="100%" />
                 <div style={{ height: 8 }} />
                 <ProbMeter value={plan.winProbWithPlan} label="With the plan executed" width="100%" />

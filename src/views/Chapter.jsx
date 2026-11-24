@@ -31,7 +31,7 @@ const fmtDate = (v) => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function TeamCard({ team, open, onOpen, onRequest, requesting }) {
+function TeamCard({ team, open, onOpen, onRequest, requesting, index = 0 }) {
   const status = teamStatus(team)
   const available = isAvailable(team)
   const record = team.record
@@ -39,7 +39,7 @@ function TeamCard({ team, open, onOpen, onRequest, requesting }) {
   const event = team.upcoming || team.latestEvent
 
   return (
-    <article className="team-card">
+    <article className="team-card" style={{ '--i': index }}>
       <div className="team-card-head">
         <div>
           <div className="num mono">{team.team}</div>
@@ -209,9 +209,10 @@ export default function Chapter({ query }) {
       {tab === 'teams' && (
         <>
           <div className="team-grid">
-            {teams.map((team) => (
+            {teams.map((team, i) => (
               <TeamCard
                 key={team.team}
+                index={i}
                 team={team}
                 open={access.team === team.team}
                 onOpen={() => (access.team === team.team ? navigate('home') : setUnlock(team))}

@@ -7,9 +7,12 @@ import './styles-platform.css'
 import './styles-redesign.css'
 import './styles-workspace.css'
 import './styles-design.css'
+import { applyMotion, getMotion } from './motion.js'
 
-// Apply the stored theme before the first paint so the app never flashes the wrong skin.
+// Apply the stored theme and motion preference before the first paint so the app never flashes
+// the wrong skin or animates for someone who asked for reduced motion.
 applyTheme(getTheme())
+applyMotion(getMotion())
 
 createRoot(document.getElementById('root')).render(<App />)
 

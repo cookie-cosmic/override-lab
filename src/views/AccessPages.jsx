@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useAccess } from '../access/AccessContext.jsx'
 import { AccessForm } from './AccessPanel.jsx'
 import { Badge, Btn, Field, Note } from '../components/ui.jsx'
+import { BrandMark } from '../components/Brand.jsx'
 import Icon from '../components/Icons.jsx'
 import { navigate } from '../router.js'
 
@@ -19,8 +20,11 @@ function AuthShell({ title, subtitle, children, footnote }) {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-mark" aria-hidden="true">OL</span>
-          <strong>Override Lab</strong>
+          <BrandMark size={30} />
+          <span className="brand-lockup-text">
+            <strong>Override Lab</strong>
+            <span className="brand-lockup-tag">Competition intelligence</span>
+          </span>
         </div>
         <h1>{title}</h1>
         {subtitle && <p className="auth-sub">{subtitle}</p>}

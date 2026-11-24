@@ -270,6 +270,41 @@ export function Spark({ values = [], width = 92, height = 22, color = 'var(--blu
   )
 }
 
+/**
+ * Semicircular win-probability gauge. The arc is drawn from the real value on mount and labelled
+ * with both sides of the comparison, so a near-50% estimate never reads as a confident call.
+ */
+export function WinGauge({ value = 0.5, label = 'Win probability', note }) {
+  const p = clampNum(Number(value) || 0, 0, 1)
+  const radius = 54
+  const length = Math.PI * radius
+  const offset = length * (1 - p)
+  const path = 'M 16 70 A 54 54 0 0 1 124 70'
+  return (
+    <div className="win-gauge">
+      <svg viewBox="0 0 140 84" role="img" aria-label={`${label}: ${Math.round(p * 100)} percent`}>
+        <path className="arc-track" d={path} fill="none" strokeWidth="9" strokeLinecap="round" />
+        <path
+          className="arc-value"
+          d={path}
+          fill="none"
+          stroke={p >= 0.5 ? 'var(--green)' : 'var(--red)'}
+          strokeWidth="9"
+          strokeLinecap="round"
+          style={{ '--len': length, '--offset': offset }}
+        />
+        <text x="70" y="60" textAnchor="middle" className="gauge-number">{Math.round(p * 100)}%</text>
+        <text x="70" y="76" textAnchor="middle" className="gauge-label">{label}</text>
+      </svg>
+      <div className="win-gauge-meta">
+        <span><span className="swatch" style={{ background: 'var(--green)' }} aria-hidden="true" />Win {(p * 100).toFixed(0)}%</span>
+        <span><span className="swatch" style={{ background: 'var(--red)' }} aria-hidden="true" />Loss {((1 - p) * 100).toFixed(0)}%</span>
+      </div>
+      {note && <p className="tiny dim" style={{ textAlign: 'center', margin: '4px 0 0' }}>{note}</p>}
+    </div>
+  )
+}
+
 export function ProbMeter({ value = 0.5, label, width = 140 }) {
   const p = clampNum(Number(value) || 0, 0, 1)
   return (

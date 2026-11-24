@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useTeam } from '../team/TeamContext.jsx'
 import { teamDataSummary } from '../team/store.js'
 import { useTheme, THEMES } from '../theme.js'
+import { useMotion, MOTIONS } from '../motion.js'
 import { useAccess } from '../access/AccessContext.jsx'
 import { Badge, Btn, Card, Field, Note, Table } from '../components/ui.jsx'
 import Icon from '../components/Icons.jsx'
@@ -102,6 +103,7 @@ function AccessTab() {
 function PreferencesTab() {
   const { prefs, setPref } = useTeam()
   const [theme, setTheme] = useTheme()
+  const [motion, setMotionPref] = useMotion()
   const { isTeam, access } = useAccess()
   const { data, reload } = useApi(isTeam ? '/api/workspace/notifications/subscriptions' : null)
   const [lead, setLead] = useState(10)
@@ -167,6 +169,12 @@ function PreferencesTab() {
               </button>
             ))}
           </div>
+        </div>
+        <div className="setting">
+          <div><strong>Motion</strong><p className="tiny dim">Field animation, entrances and transitions. Reduced motion keeps every control responsive without decorative movement.</p></div>
+          <select value={motion} onChange={(e) => setMotionPref(e.target.value)} aria-label="Motion preference">
+            {MOTIONS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
         </div>
         <div className="setting">
           <div><strong>Field orientation</strong><p className="tiny dim">Which side of the Override field the simulator shows at the bottom.</p></div>

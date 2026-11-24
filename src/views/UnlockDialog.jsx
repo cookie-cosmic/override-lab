@@ -14,6 +14,7 @@ export default function UnlockDialog({ team, onClose, onUnlocked }) {
   const [remember, setRemember] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [done, setDone] = useState(false)
   const input = useRef(null)
 
   useEffect(() => {
@@ -30,14 +31,20 @@ export default function UnlockDialog({ team, onClose, onUnlocked }) {
     if (!code.trim()) return
     setBusy(true)
     setError(null)
+    let ok = false
     try {
       await loginTeam(team.team, code, null, { remember })
       setCode('')
-      onUnlocked && onUnlocked()
+      ok = true
+      // Confirm the authorization before moving on, then hand over quickly. Reduced motion
+      // skips straight to the workspace.
+      setDone(true)
+      const reduced = document.documentElement.dataset.motion === 'reduced'
+      setTimeout(() => onUnlocked && onUnlocked(), reduced ? 140 : 640)
     } catch (err) {
       setError(err.message || 'That access code was not recognised.')
     } finally {
-      setBusy(false)
+      if (!ok) setBusy(false)
     }
   }
 
@@ -51,8 +58,8 @@ export default function UnlockDialog({ team, onClose, onUnlocked }) {
     >
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="unlock-title">
         <div className="modal-head">
-          <span className="modal-lock" aria-hidden="true">
-            <Icon name="lock" size={18} />
+          <span className={`modal-lock ${done ? 'is-unlocked' : ''}`} aria-hidden="true">
+            {done ? <span className="unlock-glyph">✓</span> : <Icon name="lock" size={18} />}
           </span>
           <div>
             <h2 id="unlock-title">Unlock team workspace</h2>
@@ -79,6 +86,7 @@ export default function UnlockDialog({ team, onClose, onUnlocked }) {
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="Enter the team access code"
+                disabled={done}
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? 'unlock-error' : undefined}
               />
@@ -109,10 +117,14 @@ export default function UnlockDialog({ team, onClose, onUnlocked }) {
             Contact your team captain if you need your access code.
           </p>
 
+          {done && (
+            <p className="unlock-success" role="status">✓ Authorized — opening the workspace…</p>
+          )}
+
           <div className="modal-foot">
             <Btn onClick={onClose} disabled={busy}>Cancel</Btn>
-            <Btn type="submit" variant="primary" disabled={busy || !code.trim()}>
-              {busy ? 'Unlocking…' : 'Unlock workspace'}
+            <Btn type="submit" variant="primary" disabled={busy || done || !code.trim()}>
+              {done ? 'Unlocked' : busy ? 'Unlocking…' : 'Unlock workspace'}
             </Btn>
           </div>
         </form>

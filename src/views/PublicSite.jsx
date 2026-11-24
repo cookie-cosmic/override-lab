@@ -1,9 +1,11 @@
-import React, { useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { endpoints, useApi } from '../api.js'
 import { useAccess } from '../access/AccessContext.jsx'
 import { AccessForm } from './AccessPanel.jsx'
 import { routeForAccess } from './AccessPages.jsx'
 import PublicTeam from './PublicTeam.jsx'
+import FieldMotion from '../components/FieldMotion.jsx'
+import { BrandMark } from '../components/Brand.jsx'
 import Icon from '../components/Icons.jsx'
 import { navigate } from '../router.js'
 import { Btn, Empty, Table } from '../components/ui.jsx'
@@ -15,8 +17,28 @@ const NAV = [
   { id: 'rules', label: 'Rules' }
 ]
 
+const RECENT_KEY = 'override-lab:recent-teams'
 const teamNumber = (value) => String(value || '').toUpperCase().replace(/[^0-9A-Z]/g, '')
 const looksLikeTeam = (value) => /^[0-9]{1,5}[A-Z]?$/.test(teamNumber(value))
+
+function readRecent() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]')
+    return Array.isArray(list) ? list.filter((x) => typeof x === 'string' && looksLikeTeam(x)).slice(0, 5) : []
+  } catch {
+    return []
+  }
+}
+
+function rememberTeam(number) {
+  const next = [number, ...readRecent().filter((x) => x !== number)].slice(0, 5)
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+  } catch {
+    /* storage is optional; the search still works */
+  }
+  return next
+}
 
 /** Minimal public chrome: brand, season, four destinations and the appearance control. */
 export function PublicHeader({ view, children }) {
@@ -27,7 +49,7 @@ export function PublicHeader({ view, children }) {
     <header className="public-header">
       <div className="public-header-inner">
         <a className="public-brand" href="#/home" aria-label="Override Lab home">
-          <span className="brand-mark" aria-hidden="true">OL</span>
+          <BrandMark size={34} />
           <span className="public-brand-text">
             <span className="public-wordmark">Override Lab</span>
             <span className="public-season">{season}</span>
@@ -72,11 +94,11 @@ export function PublicFooter() {
       <div className="public-footer-inner">
         <div>
           <div className="footer-brand">
-            <span className="brand-mark" aria-hidden="true">OL</span>
+            <BrandMark size={26} />
             <strong>Override Lab</strong>
           </div>
           <p className="tiny dim" style={{ margin: '8px 0 0', maxWidth: '34ch' }}>
-            Public VEX V5RC statistics for teams, mentors and event staff.
+            Competition intelligence for VEX V5RC teams, mentors and event staff.
           </p>
         </div>
         <nav className="footer-links" aria-label="Footer">
@@ -87,82 +109,151 @@ export function PublicFooter() {
         </nav>
         <p className="footer-meta">
           {access?.season?.name || '2026–2027 Override Season'} · Unofficial analysis, not affiliated with VEX or the REC
-          Foundation. Team results are published by RobotEvents.
+          Foundation. Results are published by RobotEvents.
         </p>
       </div>
     </footer>
   )
 }
 
-function TeamSearch({ value, onChange, onSubmit, cta = 'Search' }) {
-  return (
-    <form
-      className="public-search"
-      role="search"
-      onSubmit={(e) => {
-        e.preventDefault()
-        onSubmit()
-      }}
-    >
-      <label className="sr-only" htmlFor="public-team-search">
-        Team number
-      </label>
-      <input
-        id="public-team-search"
-        value={value}
-        onChange={(e) => onChange(teamNumber(e.target.value).slice(0, 6))}
-        placeholder="Team number"
-        inputMode="text"
-        autoComplete="off"
-        spellCheck={false}
-        aria-describedby="public-team-caption"
-      />
-      <Btn type="submit" variant="primary" disabled={!looksLikeTeam(value)}>
-        {cta}
-      </Btn>
-    </form>
-  )
-}
-
-/** The public landing page: one search, three signposts, one chapter code field. */
+/** Public landing: one search, three signposts, one chapter code field. */
 export function PublicHome() {
+  const { access } = useAccess()
   const [team, setTeam] = useState('')
   const [result, setResult] = useState(null)
   const [invalid, setInvalid] = useState(false)
+  const [recents, setRecents] = useState(readRecent)
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const blurTimer = useRef(null)
 
-  const search = () => {
-    const next = teamNumber(team)
+  const season = access?.season?.name || '2026–27 V5RC'
+  const showRecents = open && recents.length > 0
+
+  const submit = (value) => {
+    const next = teamNumber(value ?? team)
     if (!looksLikeTeam(next)) {
       setInvalid(true)
       return
     }
     setInvalid(false)
+    setOpen(false)
+    setActive(-1)
+    setTeam(next)
     setResult(next)
+    setRecents(rememberTeam(next))
+  }
+
+  const onKeyDown = (e) => {
+    if (!showRecents) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActive((i) => Math.min(recents.length - 1, i + 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActive((i) => Math.max(-1, i - 1))
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+      setActive(-1)
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault()
+      submit(recents[active])
+      setActive(-1)
+    }
   }
 
   return (
     <div className="public-page">
-      <section className="landing-hero">
-        <span className="hero-eyebrow">Built for competitive robotics</span>
-        <h1>Your competitive edge.</h1>
-        <p className="hero-sub">
-          Explore VEX V5RC team performance, tournament results, rankings, and competition statistics.
-        </p>
-        <TeamSearch
-          value={team}
-          onChange={(v) => {
-            setTeam(v)
-            setInvalid(false)
-          }}
-          onSubmit={search}
-        />
-        <span className="hero-caption" id="public-team-caption">
-          {invalid ? 'Enter a team number, such as 1234A.' : 'Explore any V5RC team. No account required.'}
-        </span>
+      <section className="hero-split">
+        <div className="hero-copy">
+          <span className="hero-season">
+            <span className="dot" aria-hidden="true" />
+            {season} · Built for competitive robotics
+          </span>
+          <h1 className="hero-title">
+            Play smarter.
+            <br />
+            <span className="hero-accent">Compete with an edge.</span>
+          </h1>
+          <p className="hero-lede">
+            Your robotics season, connected through data. Explore VEX V5RC team performance, tournament results, rankings
+            and competition statistics.
+          </p>
+
+          <form
+            className="search-shell"
+            role="search"
+            onSubmit={(e) => {
+              e.preventDefault()
+              submit()
+            }}
+          >
+            <span className="search-ico" aria-hidden="true"><Icon name="search" size={17} /></span>
+            <label className="sr-only" htmlFor="public-team-search">Team number</label>
+            <input
+              id="public-team-search"
+              value={team}
+              onChange={(e) => {
+                setTeam(teamNumber(e.target.value).slice(0, 6))
+                setInvalid(false)
+                setOpen(true)
+              }}
+              onFocus={() => {
+                clearTimeout(blurTimer.current)
+                setOpen(true)
+              }}
+              onBlur={() => {
+                blurTimer.current = setTimeout(() => setOpen(false), 120)
+              }}
+              onKeyDown={onKeyDown}
+              placeholder="Enter a team number"
+              inputMode="text"
+              autoComplete="off"
+              spellCheck={false}
+              aria-describedby="public-team-caption"
+              aria-invalid={invalid}
+            />
+            <Btn type="submit" variant="primary" disabled={!looksLikeTeam(team)}>Search</Btn>
+
+            {showRecents && (
+              <div className="search-recent" role="listbox" aria-label="Recent teams">
+                <div className="sr-head">Recent teams</div>
+                {recents.map((r, i) => (
+                  <button
+                    key={r}
+                    type="button"
+                    role="option"
+                    aria-selected={active === i}
+                    data-active={active === i}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => submit(r)}
+                  >
+                    <Icon name="clipboard" size={14} />
+                    <span className="mono">{r}</span>
+                    <span className="spacer" />
+                    <span className="tiny dim">public statistics</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </form>
+
+          <span className="hero-caption" id="public-team-caption">
+            {invalid ? 'Enter a team number, such as 1234A.' : 'Explore any V5RC team. No account required.'}
+          </span>
+
+          <div className="hero-chips">
+            <span className="chip">Official results</span>
+            <span className="chip">No account</span>
+            <span className="chip">RobotEvents data</span>
+          </div>
+        </div>
+
+        <FieldMotion />
       </section>
 
       {result && (
-        <section aria-live="polite" style={{ marginBottom: 8 }}>
+        <section className="page-enter" aria-live="polite" style={{ marginTop: 8 }}>
           <div className="row" style={{ marginBottom: 10 }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>Team {result}</h2>
             <span className="spacer" />
@@ -191,12 +282,15 @@ export function PublicHome() {
       </section>
 
       <section className="chapter-band" id="chapter">
-        <div>
-          <h2>Chapter access</h2>
-          <p>
-            Connect to your robotics chapter. Sign in once to see your chapter&apos;s teams, their official results, and
-            which workspaces are ready.
-          </p>
+        <div className="chapter-band-copy">
+          <span className="cb-icon" aria-hidden="true"><Icon name="users" size={17} /></span>
+          <div>
+            <h2>Chapter access</h2>
+            <p>
+              Connect to your robotics chapter. Sign in once to see your chapter&apos;s teams, their official results,
+              and which workspaces are ready.
+            </p>
+          </div>
         </div>
         <div>
           <AccessForm compact initialMode="chapter" onDone={routeForAccess} />
@@ -222,15 +316,34 @@ export function PublicTeams({ query }) {
         <p className="hero-sub" style={{ marginBottom: 20 }}>
           Official match results and descriptive statistics, published by RobotEvents. No account required.
         </p>
-        <TeamSearch
-          value={team}
-          onChange={setTeam}
-          onSubmit={() => (looksLikeTeam(team) ? setResult(teamNumber(team)) : setResult(null))}
-        />
+        <form
+          className="search-shell"
+          role="search"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const next = teamNumber(team)
+            setResult(looksLikeTeam(next) ? next : null)
+            if (looksLikeTeam(next)) rememberTeam(next)
+          }}
+        >
+          <span className="search-ico" aria-hidden="true"><Icon name="search" size={17} /></span>
+          <label className="sr-only" htmlFor="teams-page-search">Team number</label>
+          <input
+            id="teams-page-search"
+            value={team}
+            onChange={(e) => setTeam(teamNumber(e.target.value).slice(0, 6))}
+            placeholder="Enter a team number"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Btn type="submit" variant="primary" disabled={!looksLikeTeam(team)}>Search</Btn>
+        </form>
       </div>
 
       {result ? (
-        <PublicTeam team={result} />
+        <div className="page-enter">
+          <PublicTeam team={result} />
+        </div>
       ) : (
         <div className="note">
           Enter a team number to see its record, average alliance score, tournaments and recent form.
@@ -243,7 +356,7 @@ export function PublicTeams({ query }) {
 /** Public competition calendar. */
 export function PublicCompetitions() {
   const { data, error, loading } = useApi(endpoints.events())
-  const events = data?.events || []
+  const events = useMemo(() => data?.events || [], [data])
 
   return (
     <div className="public-page" style={{ paddingTop: 40 }}>
@@ -258,9 +371,7 @@ export function PublicCompetitions() {
 
       {loading && <div className="skeleton-block" aria-busy="true">Loading the event calendar…</div>}
       {error && (
-        <div className="note bad">
-          The event calendar is unavailable right now. Public team statistics still work.
-        </div>
+        <div className="note bad">The event calendar is unavailable right now. Public team statistics still work.</div>
       )}
       {!loading && !error && (
         <div className="card">
