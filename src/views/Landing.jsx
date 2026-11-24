@@ -4,7 +4,8 @@ import Icon from '../components/Icons.jsx'
 import { useTeam } from '../team/TeamContext.jsx'
 import { navigate } from '../router.js'
 import { THEMES, useTheme } from '../theme.js'
-import { Btn } from '../components/ui.jsx'
+import { Btn, Card } from '../components/ui.jsx'
+import { AccessForm } from './AccessPanel.jsx'
 
 const FEATURES = [
   {
@@ -143,10 +144,10 @@ export default function Landing({ onTeam }) {
       <section className="hero">
         <div className="hero-copy">
           <span className="eyebrow">Override Lab · VEX V5 Robotics Competition · Override</span>
-          <h1>Compete smarter. Build your advantage.</h1>
+          <h1>Your competitive edge.</h1>
           <p className="hero-sub">
-            Tournament intelligence, scouting, alliance strategy and robot development tools built for your VEX V5RC
-            team.
+            Explore VEX V5RC competition statistics, tournament results, rankings, and team performance — then open
+            your team&apos;s private strategy workspace.
           </p>
           <TeamLookup cta="Find my team →" onConfirmed={onTeam} />
           {hasTeams && (
@@ -160,6 +161,31 @@ export default function Landing({ onTeam }) {
         </div>
 
         <PreviewCard />
+      </section>
+
+      <section className="landing-section" id="welcome-access">
+        <div className="section-head">
+          <h2>Public statistics, or your team workspace</h2>
+          <p>Searching a team number is always public. Private tools need a chapter and a team credential.</p>
+        </div>
+        <div className="access-split">
+          <Card title="Chapter access" subtitle="for coordinators and their teams">
+            <p className="tiny dim">
+              Chapter access codes are issued by an authorised coordinator. A chapter code opens the chapter dashboard;
+              each team&apos;s private workspace still needs that team&apos;s own PIN.
+            </p>
+            <AccessForm compact onDone={() => window.location.reload()} />
+          </Card>
+          <Card title="Public visitor" subtitle="no account required">
+            <p className="tiny dim">
+              Anyone can search a team and read its official record: results, rankings, skills, awards and event history.
+              No sign-in, chapter code or team PIN is needed for that.
+            </p>
+            <Btn variant="primary" size="sm" onClick={() => document.querySelector('.hero .lookup-bar input')?.focus()}>
+              Search a team number
+            </Btn>
+          </Card>
+        </div>
       </section>
 
       <section className="landing-section" id="welcome-features">
@@ -193,9 +219,9 @@ export default function Landing({ onTeam }) {
           ))}
         </div>
         <div className="privacy-note">
-          <strong>Private work stays private.</strong> Entering a team number never grants editing access to that team&apos;s
-          workspace. Shared workspaces require an invitation from the team that owns them; this build keeps personal
-          work in your own browser and does not expose one team&apos;s saved data to another.
+          <strong>Private work stays private.</strong> Entering a team number never grants access to that team&apos;s
+          workspace. Strategic tools are enforced on the server: your device holds a revocable session, never a stored
+          PIN, and one team cannot read another team&apos;s records by changing a number in the URL.
         </div>
       </section>
 

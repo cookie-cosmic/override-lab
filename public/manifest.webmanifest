@@ -1,0 +1,30 @@
+{
+  "name": "Override Lab",
+  "short_name": "Override Lab",
+  "description": "VEX V5RC Override competition statistics, match intelligence and team workspaces.",
+  "start_url": "/#/home",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "categories": ["sports", "education", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Match Day", "url": "/#/match-day" },
+    { "name": "Intelligence", "url": "/#/intelligence" }
+  ]
+}

@@ -9,6 +9,28 @@ const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 // every request, so a deployment whose own token is missing or rejected still works.
 const TOKEN_KEY = 'vex-api-token'
 
+// An opaque, revocable device session. It is not a credential: it can be revoked server-side
+// at any time, and the database stores only its hash. No chapter code, team PIN or owner code
+// is ever written to browser storage.
+const SESSION_KEY = 'override-lab:session'
+
+export function getSession() {
+  try {
+    return localStorage.getItem(SESSION_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function setSession(token) {
+  try {
+    if (token) localStorage.setItem(SESSION_KEY, token)
+    else localStorage.removeItem(SESSION_KEY)
+  } catch {
+    /* private mode: the session lasts for this tab only */
+  }
+}
+
 export function getApiToken() {
   try {
     return localStorage.getItem(TOKEN_KEY) || ''
@@ -28,11 +50,13 @@ export function setApiToken(value) {
 
 export async function api(path, opts = {}) {
   const token = getApiToken()
+  const session = getSession()
   const res = await fetch(API_BASE + path, {
     ...opts,
     headers: {
       'content-type': 'application/json',
       ...(token ? { 'x-robotevents-token': token } : {}),
+      ...(session ? { 'x-ol-session': session } : {}),
       ...(opts.headers || {})
     }
   })
@@ -40,7 +64,15 @@ export async function api(path, opts = {}) {
   const payload = type.includes('json') ? await res.json().catch(() => null) : await res.text()
   if (!res.ok) {
     const msg = payload && typeof payload === 'object' ? payload.error || payload.hint : payload
-    throw new Error(msg || `Request failed (${res.status})`)
+    const error = new Error(msg || `Request failed (${res.status})`)
+    // The code is what the UI uses to tell "you need access" apart from "this failed".
+    if (payload && typeof payload === 'object') {
+      error.code = payload.code || null
+      error.feature = payload.feature || null
+      error.hint = payload.hint || null
+    }
+    error.status = res.status
+    throw error
   }
   return payload
 }

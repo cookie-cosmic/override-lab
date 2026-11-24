@@ -11,3 +11,6 @@ data/vex.db-shm
 
 # local reference checkouts
 .ref/
+
+# security test artifacts
+.tmp-security-test/

@@ -24,7 +24,9 @@ const CORS_HEADERS = {
   'access-control-allow-origin': CORS_ORIGIN,
   'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
   // x-robotevents-token carries a key the user pasted into the UI; it is never stored here.
-  'access-control-allow-headers': 'content-type,x-robotevents-token',
+  // x-ol-session is an opaque, revocable device session; x-ol-totp is a one-time owner code.
+  'access-control-allow-headers': 'content-type,x-robotevents-token,x-ol-session,x-ol-totp',
+  'access-control-expose-headers': 'content-type',
   'access-control-max-age': '86400'
 }
 
@@ -124,7 +126,31 @@ function serveStatic(req, res, pathname) {
   })
 }
 
+// Baseline web hardening. No framing restriction is applied because the app is legitimately
+// embedded by its own preview hosts; the API's authorization does not depend on framing.
+function harden(res) {
+  res.setHeader('x-content-type-options', 'nosniff')
+  res.setHeader('referrer-policy', 'strict-origin-when-cross-origin')
+  res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()')
+  res.setHeader(
+    'content-security-policy',
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "img-src 'self' data: https:",
+      "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
+      "connect-src 'self' https: ws: wss:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'"
+    ].join('; ')
+  )
+}
+
 const server = http.createServer(async (req, res) => {
+  harden(res)
   let url
   try {
     url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)

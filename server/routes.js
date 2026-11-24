@@ -9,6 +9,8 @@ import { currentSeason, inSeason, seasonMismatch, nameScore, programMismatch } f
 import { teamHistory } from './history.js'
 import { parseMatchCsv, parseTeamCsv } from './ingest/csv.js'
 import { sendJson, sendText, readBody, num } from './util.js'
+import { hasFeature, requiredFeature, resolveAccess } from './access.js'
+import { handleAccess, handleWorkspace } from './routes-access.js'
 
 const TEAM_NUMBER = /^[0-9]{1,5}[A-Z]?$/;
 const normalizeTeam = (v) => String(v || '').trim().replace(/^#/, '').replace(/\s+/g, '').toUpperCase();
@@ -161,6 +163,26 @@ export async function handleApi(req, res, url) {
   const authToken = clientToken || robotEventsToken()
 
   try {
+    const access = await resolveAccess(req)
+
+    // The access hierarchy and the private workspace own their own routes.
+    if (parts[0] === 'access') return await handleAccess(req, res, url, parts, q, method, access)
+    if (parts[0] === 'workspace') return await handleWorkspace(req, res, url, parts, q, method, access)
+
+    // Public statistics stay public. Strategic endpoints require an approved team workspace
+    // with the permission enabled — enforced here, not by hiding a navigation link. The owner
+    // bypasses the check; a chapter code never does.
+    const feature = requiredFeature(method, parts)
+    if (feature && !hasFeature(access, feature)) {
+      return sendJson(res, 403, {
+        error: 'this tool belongs to an approved team workspace',
+        code: 'feature_locked',
+        feature,
+        kind: access.kind,
+        hint: 'Enter your team access PIN, or ask the platform owner to enable this feature.'
+      })
+    }
+
     if (parts[0] === 'health') {
       return sendJson(res, 200, { ok: true, events: db.listEvents().length, version: 1, wokeAt: new Date().toISOString() })
     }
@@ -904,6 +926,8 @@ export async function handleApi(req, res, url) {
   } catch (err) {
     const status = err.status || 500
     if (status >= 500) console.error(`[api] ${req.method} ${url.pathname} → ${err.message}`)
-    return sendJson(res, status, { error: err.message })
+    // Machine-readable codes and hints let the UI explain a refusal without guessing, while
+    // never exposing whether a credential exists or was close.
+    return sendJson(res, status, { error: err.message, ...(err.code ? { code: err.code } : {}), ...(err.hint ? { hint: err.hint } : {}) })
   }
 }

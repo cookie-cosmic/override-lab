@@ -11,7 +11,9 @@
     "dev": "vite",
     "build": "vite build",
     "start": "node server/index.js",
-    "preview": "npm run build && node server/index.js"
+    "preview": "npm run build && node server/index.js",
+    "owner:totp": "node scripts/owner-totp.js",
+    "test:security": "node scripts/security-test.js"
   },
   "dependencies": {
     "react": "^18.3.1",

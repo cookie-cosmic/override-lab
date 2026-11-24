@@ -16,7 +16,7 @@ import { fmt, pct } from '../api.js'
  * one alliance do not literally add their solo averages, and the page says so wherever the
  * number appears.
  */
-function simulate(redTeams, blueTeams, trials = 20000) {
+export function simulate(redTeams, blueTeams, trials = 20000) {
   if (!redTeams.length || !blueTeams.length) return null
   const draw = (t) => {
     const mean = t.avgScore
